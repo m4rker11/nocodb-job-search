@@ -1,0 +1,4 @@
+PyQt6==6.6.0  # For building the GUI
+pandas==2.1.3  # For CSV handling and data manipulation
+importlib-metadata==6.0.0  # For dynamic module imports
+pyinstaller==6.0.0  # For packaging the application
