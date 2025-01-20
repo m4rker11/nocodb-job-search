@@ -1,12 +1,25 @@
+import os
 from PyQt6.QtCore import QSettings
 from .crypto_service import encrypt_value, decrypt_value
+
+# For .env handling
+from dotenv import load_dotenv, set_key, get_key
 
 ORGANIZATION_NAME = "MyCompany"
 APPLICATION_NAME = "MySmartApp"
 
+# Path to your .env file. Adjust if you want it elsewhere.
+# ENV_FILE_PATH = os.path.join(os.path.dirname(__file__), ".env")
+# the env file path needs to be in the directory above
+ENV_FILE_PATH = os.path.join(os.path.dirname(__file__), "..", ".env")
+
 def get_qsettings() -> QSettings:
     return QSettings(ORGANIZATION_NAME, APPLICATION_NAME)
 
+# -------------------------------
+# QSETTINGS-BASED FUNCTIONS
+# (linkedIn, resume, email, etc.)
+# -------------------------------
 def get_linkedin_url() -> str:
     settings = get_qsettings()
     return settings.value("user/linkedin_url", "", type=str)
@@ -44,3 +57,31 @@ def set_email_password(password: str):
     encrypted = encrypt_value(password)
     settings.setValue("email/password", encrypted)
     settings.sync()
+
+# -------------------------------
+# ENV (.env) FUNCTIONS
+# -------------------------------
+def load_env_vars():
+    """
+    Load existing .env variables into os.environ,
+    so that get_key / os.getenv can see them.
+    """
+    load_dotenv(ENV_FILE_PATH)
+
+def get_env_var(key: str) -> str:
+    """
+    Return the value of `key` from the .env file or environment.
+    (We call get_key for guaranteed reading from .env.)
+    """
+    return get_key(ENV_FILE_PATH, key) or ""
+
+def set_env_var(key: str, value: str):
+    """
+    Write/update a key in the .env file.
+    """
+    # Create the .env if it doesn't exist
+    if not os.path.exists(ENV_FILE_PATH):
+        with open(ENV_FILE_PATH, "w", encoding="utf-8") as f:
+            f.write("")  # empty file
+
+    set_key(ENV_FILE_PATH, key, value)

@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------
     def open_settings_dialog(self):
         dlg = SettingsDialog(self)
-        if dlg.exec() == QDialog.Accepted:
+        if dlg.exec() == QDialog.accepted:
             QMessageBox.information(self, "Settings Saved", "Your settings have been updated.")
 
     # ------------------------------------------------------
@@ -273,10 +273,13 @@ class MainWindow(QMainWindow):
         rename_action = menu.addAction("Rename Column")
         delete_action = menu.addAction("Delete Column")
         dtype_action = menu.addAction("Change Data Type")
+        add_column_action = menu.addAction("Add Column")
 
         action = menu.exec(self.table_view.horizontalHeader().mapToGlobal(pos))
         if action == rename_action:
             self.rename_column(col_index)
+        elif action == add_column_action:
+            self.add_new_column()
         elif action == delete_action:
             self.delete_column(col_index)
         elif action == dtype_action:
@@ -288,7 +291,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------
     def show_table_context_menu(self, pos: QPoint):
         menu = QMenu(self)
-        add_column_action = menu.addAction("Add Column")
 
         index = self.table_view.indexAt(pos)
         if not index.isValid():
@@ -315,10 +317,8 @@ class MainWindow(QMainWindow):
                     break
 
         action = menu.exec(self.table_view.mapToGlobal(pos))
-
-        if action == add_column_action:
-            self.add_new_column()
-        elif action == send_email_action:
+        print(f"Action: {action}")
+        if action == send_email_action:
             self.open_compose_dialog_for_row(row_idx)
         elif force_rerun_action and action == force_rerun_action:
             self.force_rerun_for_row(col_name, row_idx)
@@ -353,7 +353,7 @@ class MainWindow(QMainWindow):
             body=body_val,
             parent=self
         )
-        if dlg.exec() == QDialog.Accepted:
+        if dlg.exec() == QDialog.accepted:
             # Optionally mark the row as 'sent'
             df.at[row_idx, "SentAt"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.df_model.setDataFrame(df)

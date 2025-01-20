@@ -26,18 +26,31 @@ class TransformationManager:
         transformation_name: str,
         input_cols: list,
         output_col: str,
-        condition_str: str
+        condition_type: str = None,
+        condition_col: str = None,
+        condition_value: str = None,
+        condition_str: str = None,  # Accept condition_str for backward compatibility
+        extra_params: dict = None
     ):
         """
         Add a new transformation entry to the metadata, overwriting if already exists.
         transform_id is a short string ID you use to reference it (e.g. 'EmailEnrich1').
+
+        Accepts legacy `condition_str` parameter but does not use it,
+        preferring simplified condition parameters.
         """
+        if extra_params is None:
+            extra_params = {}
+
         self._metadata["transformations"][transform_id] = {
             "transformation_name": transformation_name,
             "input_cols": input_cols,
             "output_col": output_col,
-            "condition_str": condition_str,
-            "row_signatures": {}
+            "condition_type": condition_type,
+            "condition_col": condition_col,
+            "condition_value": condition_value,
+            "row_signatures": {},
+            "extra_params": extra_params
         }
 
     def save_metadata(self):
@@ -64,18 +77,11 @@ class TransformationManager:
         for transform_id, meta in self._metadata["transformations"].items():
             transformation = self.transformations_dict.get(meta["transformation_name"])
             if not transformation:
-                continue  # or raise an error
+                # Could raise an error or skip
+                continue
 
-            input_cols = meta["input_cols"]
-            output_col = meta["output_col"]
-            condition_str = meta["condition_str"]
-
-            # Evaluate condition (safe eval or use df.query) - be cautious with real security
-            try:
-                condition_series = df.eval(condition_str)
-            except Exception:
-                # If the user entered something invalid
-                condition_series = pd.Series([True]*len(df), index=df.index)  # fallback: run on all
+            # Condition logic
+            condition_series = self._build_condition_series(df, meta)
 
             for row_idx in range(len(df)):
                 # Check condition for that row
@@ -83,13 +89,14 @@ class TransformationManager:
                     continue  # skip if condition is false
 
                 # Compute row signature
+                input_cols = meta["input_cols"]
                 new_sig = self.compute_row_signature(df, row_idx, input_cols)
                 old_sig = meta["row_signatures"].get(str(row_idx), None)
 
                 # Only run if signature changed
                 if new_sig != old_sig:
                     # Run transformation for that row
-                    df = self.run_transformation_row(df, transformation, input_cols, output_col, row_idx)
+                    df = self.run_transformation_row(df, transform_id, row_idx)
                     # Update signature
                     meta["row_signatures"][str(row_idx)] = new_sig
 
@@ -106,31 +113,74 @@ class TransformationManager:
         """
         meta = self._metadata["transformations"].get(transform_id)
         if not meta:
-            return df  # unknown transformation
+            # Unknown transformation
+            return df
 
-        transformation = self.transformations_dict.get(meta["transformation_name"])
-        if not transformation:
-            return df  # unknown transformation type
-
-        input_cols = meta["input_cols"]
-        output_col = meta["output_col"]
         # Actually run transformation logic on that row
-        df = self.run_transformation_row(df, transformation, input_cols, output_col, row_idx)
+        df = self.run_transformation_row(df, transform_id, row_idx)
+
         # Recompute and store new signature
-        new_sig = self.compute_row_signature(df, row_idx, input_cols)
+        new_sig = self.compute_row_signature(df, row_idx, meta["input_cols"])
         meta["row_signatures"][str(row_idx)] = new_sig
+
         return df
 
-    def run_transformation_row(self, df: pd.DataFrame, transformation, input_cols, output_col, row_idx):
+    def run_transformation_row(self, df: pd.DataFrame, transform_id: str, row_idx: int) -> pd.DataFrame:
         """
         Actually call 'transformation.transform' for a single row.
         Because the default 'transform' often expects the entire DataFrame,
-        we can do a partial approach or re-run for the entire DF but only row row_idx is changed.
+        we do it for the entire DF (simple approach).
 
-        For demonstration, we'll re-run the entire column logic but
-        it only truly updates row_idx if the transformation is well-coded.
+        The transformation itself should handle row-by-row logic if needed.
         """
-        # This approach calls the transformation on the entire DF (simple approach).
-        # The transformation itself can handle logic row by row if desired.
-        df = transformation.transform(df, output_col, *input_cols)
+        meta = self._metadata["transformations"].get(transform_id)
+        if not meta:
+            return df
+
+        transformation = self.transformations_dict.get(meta["transformation_name"])
+        if not transformation:
+            return df
+
+        input_cols = meta["input_cols"]
+        output_col = meta["output_col"]
+        extra_params = meta.get("extra_params", {})
+
+        # Call the transformation, passing **extra_params to handle any custom arguments
+        df = transformation.transform(df, output_col, *input_cols, **extra_params)
+
         return df
+
+    def _build_condition_series(self, df: pd.DataFrame, meta: dict) -> pd.Series:
+        """
+        Construct a boolean series based on condition_type, condition_col, condition_value.
+        If none is given, default to True for all rows.
+        """
+        ctype = meta.get("condition_type")
+        ccol = meta.get("condition_col")
+        cval = meta.get("condition_value")
+
+        # If no condition type or no column, run on all rows
+        if not ctype or not ccol or ccol not in df.columns:
+            return pd.Series([True]*len(df), index=df.index)
+
+        # Convert column to string type (just to handle None vs empty gracefully)
+        col_series = df[ccol].astype(str)
+
+        # Build condition
+        if ctype == "is_empty":
+            # True if cell is "" or "nan" (after astype(str))
+            return (col_series == "") | (col_series.str.lower() == "nan")
+
+        elif ctype == "is_not_empty":
+            # Opposite of is_empty
+            return ~((col_series == "") | (col_series.str.lower() == "nan"))
+
+        elif ctype == "equals" and cval is not None:
+            return col_series == str(cval)
+
+        elif ctype == "not_equals" and cval is not None:
+            return col_series != str(cval)
+
+        else:
+            # If something is missing or invalid, default to all True
+            return pd.Series([True]*len(df), index=df.index)
