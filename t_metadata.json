@@ -1,0 +1,18 @@
+{
+  "transformations": {
+    "Enrich1": {
+      "transformation_name": "Get email from name & domain",
+      "input_cols": [
+        "Column1",
+        "new_column"
+      ],
+      "output_col": "new_column",
+      "condition_str": "df['Email'].notnull()",
+      "row_signatures": {
+        "0": "19186ac11b542580384a9dd943605a35",
+        "1": "7ab25426505d470729bf2e4f289b9642",
+        "2": "56efb553d18aa7064ede46ea540e53b3"
+      }
+    }
+  }
+}

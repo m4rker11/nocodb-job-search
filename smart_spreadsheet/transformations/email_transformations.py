@@ -1,7 +1,7 @@
 # transformations/email_transformations.py
 
 import pandas as pd
-from .transformations_base import BaseTransformation
+from .base import BaseTransformation
 
 class EmailFromNameDomain(BaseTransformation):
     """
