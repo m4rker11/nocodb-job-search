@@ -7,7 +7,7 @@ def main():
     window = MainWindow()
     window.show()
 
-    window.check_settings_and_prompt()
+    # window.check_settings_and_prompt()
 
     sys.exit(app.exec())
 

@@ -5,87 +5,60 @@ import pandas as pd
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableView, QComboBox, QFileDialog, QMessageBox,
-    QInputDialog, QMenu, QDialog, QToolBar, QLineEdit,
+    QInputDialog, QMenu, QDialog, QToolBar
 )
-from services.settings_service import get_email_account, get_resume_folder
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtWidgets import QMainWindow, QMessageBox
+
+# Services and UI imports
+from services.settings_service import get_email_account, get_resume_folder
 from ui.settings_dialog import SettingsDialog
 from ui.data_frame_model import DataFrameModel
 from ui.compose_email_dialog import ComposeEmailDialog
 from services.file_service import load_data, save_data
 from transformations.utils import find_transformations_in_package
-# from ui.transform_dialog import TransformDialog  # For future multi-column support
 from transformations.manager import TransformationManager
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Smart Spreadsheet (PyQt) - AutoSave & Timestamp")
         self.resize(1100, 700)
-        self._init_menubar()
-        self.load_user_settings()
+
+        # Track if a file is loaded/created
+        self.current_file_path = None
+
+        # DataFrame model
+        self.df_model = DataFrameModel(pd.DataFrame())
+
+        # Transformation manager (set when a file is loaded)
+        self.trans_manager = None
+
+        # Discover transformations
+        self.transformations_dict = find_transformations_in_package("transformations")
+
+        # Build UI immediately so it’s visible
         self.init_ui()
+
+        # After building UI, load/check user settings
+        self.load_user_settings()
+
     def init_ui(self):
         """
-        Initialize UI elements such as toolbar buttons.
+        Initialize the main UI elements: toolbar, table, transformations row, etc.
         """
-        main_widget = QWidget()
-        layout = QVBoxLayout()
+        # ========== TOOLBAR ==========
         toolbar = QToolBar("Main Toolbar")
         self.addToolBar(toolbar)
 
         settings_action = QAction("Preferences", self)
         settings_action.triggered.connect(self.open_settings_dialog)
         toolbar.addAction(settings_action)
-        # # Add a single-click settings button at the top
-        # self.settings_button = QPushButton("Settings")
-        # self.settings_button.clicked.connect(self.open_settings_dialog)
-        # layout.addWidget(self.settings_button)
 
-        # Add other widgets here (TableView, etc.)
-        self.setCentralWidget(main_widget)
-        main_widget.setLayout(layout)
-
-    def load_user_settings(self):
-        """
-        Automatically load settings on startup and check for necessary values.
-        """
-        email_account = get_email_account()
-        resume_folder = get_resume_folder()
-
-        if not email_account or not resume_folder:
-            QMessageBox.warning(
-                self, 
-                "Incomplete Setup",
-                "Please complete your settings before using the application."
-            )
-            self.open_settings_dialog()
-
-    def _init_menubar(self):
-        menubar = self.menuBar()
-
-        open_settings_action = QAction("Preferences", self)
-        open_settings_action.triggered.connect(self.open_settings_dialog)
-
-    def open_settings_dialog(self):
-        dlg = SettingsDialog(self)
-        if dlg.exec():
-            QMessageBox.information(self, "Settings Saved", "Your settings have been updated.")
-        # Track if a file is loaded/created
-        self.current_file_path = None
-
-        # Initialize DataFrame model
-        self.df_model = DataFrameModel(pd.DataFrame())
-        # The transformation manager will be set once we have a file loaded
-        self.trans_manager = None
-        # Load transformations
-        self.transformations_dict = find_transformations_in_package("transformations")
-
-        # Main layout
-        widget = QWidget()
-        main_layout = QVBoxLayout(widget)
-        self.setCentralWidget(widget)
+        # ========== CENTRAL WIDGET & LAYOUT ==========
+        main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
 
         # Top row of buttons
         top_btn_layout = QHBoxLayout()
@@ -100,17 +73,16 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(top_btn_layout)
 
-        # Table
+        # Table View
         self.table_view = QTableView()
         self.table_view.setModel(self.df_model)
         main_layout.addWidget(self.table_view, stretch=1)
 
-        # Column header context menu
+        # Enable context menus on header and table
         header = self.table_view.horizontalHeader()
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self.on_header_context_menu)
 
-        # Table view context menu
         self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self.show_table_context_menu)
 
@@ -136,6 +108,34 @@ class MainWindow(QMainWindow):
 
         # Auto-save on data change
         self.df_model.dataChanged.connect(self.auto_save)
+
+        self.setCentralWidget(main_widget)
+
+    def load_user_settings(self):
+        """
+        Check essential settings (like email credentials, resume folder) AFTER UI is loaded.
+        Prompt user if missing.
+        """
+        email_account = get_email_account()
+        resume_folder = get_resume_folder()
+
+        if not email_account or not resume_folder:
+            msg = (
+                "Some essential settings (Email or Resume folder) are missing.\n"
+                "Please configure them now."
+            )
+            result = QMessageBox.warning(self, "Incomplete Setup", msg,
+                                         QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+            if result == QMessageBox.StandardButton.Ok:
+                self.open_settings_dialog()
+
+    # ------------------------------------------------------
+    # SETTINGS DIALOG
+    # ------------------------------------------------------
+    def open_settings_dialog(self):
+        dlg = SettingsDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            QMessageBox.information(self, "Settings Saved", "Your settings have been updated.")
 
     # ------------------------------------------------------
     # CREATE NEW vs SAVE FILE button (toggled by file state)
@@ -187,6 +187,7 @@ class MainWindow(QMainWindow):
         )
         if file_path:
             self.load_file(file_path)
+
     def load_file(self, file_path):
         try:
             df = load_data(file_path)
@@ -202,6 +203,7 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "Error Loading File", str(e))
+
     def set_current_file_path(self, path: str):
         self.current_file_path = path
         # Now that a file is loaded, switch button text to "Save File"
@@ -260,7 +262,7 @@ class MainWindow(QMainWindow):
     def add_new_row(self):
         row_position = self.df_model.rowCount()
         self.df_model.insertRows(row_position, 1)
-        # auto-save is triggered via dataChanged
+        # auto-save triggered via dataChanged signal
 
     def on_header_context_menu(self, pos: QPoint):
         col_index = self.table_view.horizontalHeader().logicalIndexAt(pos.x())
@@ -280,6 +282,10 @@ class MainWindow(QMainWindow):
         elif action == dtype_action:
             self.change_column_dtype(col_index)
 
+    # ------------------------------------------------------
+    # UNIFIED TABLE CONTEXT MENU
+    # (Add Column, Send Email, Force Re-Run)
+    # ------------------------------------------------------
     def show_table_context_menu(self, pos: QPoint):
         menu = QMenu(self)
         add_column_action = menu.addAction("Add Column")
@@ -291,16 +297,22 @@ class MainWindow(QMainWindow):
 
         row_idx = index.row()
         col_idx = index.column()
-
         df = self.df_model.dataFrame()
         col_name = df.columns[col_idx]
 
-        # We'll guess if the user is right-clicking on a "subject" or "body" column
-        # then we can do "Send Email"
+        # If user is right-clicking on a "subject" column,
+        # let's offer "Send Email..."
         send_email_action = None
-        # Alternatively, if you only want to show "Send Email" for subject columns:
         if "subject" in col_name.lower():
             send_email_action = menu.addAction("Send Email...")
+
+        # Force Re-Run if this column is known as an output_col in metadata
+        force_rerun_action = None
+        if self.trans_manager and col_name:
+            for tid, tmeta in self.trans_manager.get_metadata()["transformations"].items():
+                if tmeta["output_col"] == col_name:
+                    force_rerun_action = menu.addAction(f"Force Re-Run {tid} on This Row")
+                    break
 
         action = menu.exec(self.table_view.mapToGlobal(pos))
 
@@ -308,17 +320,17 @@ class MainWindow(QMainWindow):
             self.add_new_column()
         elif action == send_email_action:
             self.open_compose_dialog_for_row(row_idx)
+        elif force_rerun_action and action == force_rerun_action:
+            self.force_rerun_for_row(col_name, row_idx)
+
     def open_compose_dialog_for_row(self, row_idx: int):
         """
         Use the row's data to populate the ComposeEmailDialog.
         """
         df = self.df_model.dataFrame()
-
         if row_idx < 0 or row_idx >= len(df):
             return
 
-        # Example: find columns named "draft_subject", "draft_body", "Email"
-        # or use whatever naming scheme you have
         subject_col = None
         body_col = None
         to_col = None
@@ -331,7 +343,6 @@ class MainWindow(QMainWindow):
             if "email" in col.lower():
                 to_col = col
 
-        # Get the row values
         subject_val = str(df.at[row_idx, subject_col]) if subject_col else ""
         body_val = str(df.at[row_idx, body_col]) if body_col else ""
         to_val = str(df.at[row_idx, to_col]) if to_col else ""
@@ -347,6 +358,24 @@ class MainWindow(QMainWindow):
             df.at[row_idx, "SentAt"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.df_model.setDataFrame(df)
             self.auto_save(force=True)
+
+    def force_rerun_for_row(self, col_name: str, row_idx: int):
+        """
+        Force re-run for the row if the column is recognized as an output_col.
+        """
+        df = self.df_model.dataFrame()
+        for tid, tmeta in self.trans_manager.get_metadata()["transformations"].items():
+            if tmeta["output_col"] == col_name:
+                new_df = self.trans_manager.force_rerun_transformation(df, tid, row_idx)
+                self.df_model.setDataFrame(new_df)
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Forcibly re-ran '{tid}' on row {row_idx}."
+                )
+                self.auto_save(force=True)
+                break
+
     def add_new_column(self):
         new_name, ok = QInputDialog.getText(
             self, "Add Column", "Enter name for the new column:"
@@ -406,13 +435,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Info", "No transformations found in package.")
             return
 
-        transform_name = self.transform_combo.currentText()
-        transformation = self.trans_manager.transformations_dict[transform_name]
-
         df = self.df_model.dataFrame()
         if df.empty:
             QMessageBox.information(self, "Info", "DataFrame is empty; cannot apply transformation.")
             return
+
+        transform_name = self.transform_combo.currentText()
+        transformation = self.trans_manager.transformations_dict[transform_name]
 
         # Ask user for input columns
         required_inputs = transformation.required_inputs()
@@ -430,11 +459,13 @@ class MainWindow(QMainWindow):
             chosen_cols.append(col)
 
         # Ask user for output column name
-        output_col, ok2 = QInputDialog.getText(self, "Output Column", "New Column Name:", text="new_column")
+        output_col, ok2 = QInputDialog.getText(
+            self, "Output Column", "New Column Name:", text="new_column"
+        )
         if not ok2 or not output_col:
             return
 
-        # Ask user for condition expression (optional)
+        # Optional condition expression
         condition_str, ok3 = QInputDialog.getText(
             self,
             "Condition",
@@ -444,8 +475,10 @@ class MainWindow(QMainWindow):
         if not ok3:
             return
 
-        # Let user pick an ID for this transformation (or auto-generate)
-        transform_id, ok4 = QInputDialog.getText(self, "Transform ID", "Give an ID for this transformation:", text="Enrich1")
+        # Transform ID
+        transform_id, ok4 = QInputDialog.getText(
+            self, "Transform ID", "Give an ID for this transformation:", text="Enrich1"
+        )
         if not ok4 or not transform_id.strip():
             return
 
@@ -462,48 +495,8 @@ class MainWindow(QMainWindow):
         new_df = self.trans_manager.apply_all_transformations(df)
         self.df_model.setDataFrame(new_df)
 
-        QMessageBox.information(self, "Success", f"Transformation '{transform_id}' applied. Check new column '{output_col}'.")
+        QMessageBox.information(
+            self, "Success",
+            f"Transformation '{transform_id}' applied. Check new column '{output_col}'."
+        )
         self.auto_save(force=True)
-
-    # ------------------------------------------------------
-    # Right-click context menu: Force Re-Run on a single cell
-    # ------------------------------------------------------
-    def show_table_context_menu(self, pos: QPoint):
-        menu = QMenu(self)
-        add_column_action = menu.addAction("Add Column")
-
-        # We'll add a "Force Re-Run" only if user clicks on a cell in an enrichment col
-        index = self.table_view.indexAt(pos)
-        col_index = index.column()
-
-        col_name = None
-        if col_index >= 0:
-            col_name = self.df_model.dataFrame().columns[col_index]
-
-        force_rerun_action = None
-        if col_name:
-            # Check if this column is an output_col in any transformation
-            # We store these in the manager's metadata
-            for tid, tmeta in self.trans_manager.get_metadata()["transformations"].items():
-                if tmeta["output_col"] == col_name:
-                    force_rerun_action = menu.addAction(f"Force Re-Run {tid} on This Row")
-                    break
-
-        action = menu.exec(self.table_view.mapToGlobal(pos))
-
-        if action == add_column_action:
-            self.add_new_column()
-        elif force_rerun_action and action == force_rerun_action:
-            # Force re-run for the row
-            row_idx = index.row()
-            df = self.df_model.dataFrame()
-
-            # Find which transform_id matched
-            for tid, tmeta in self.trans_manager.get_metadata()["transformations"].items():
-                if tmeta["output_col"] == col_name:
-                    # This is the one
-                    new_df = self.trans_manager.force_rerun_transformation(df, tid, row_idx)
-                    self.df_model.setDataFrame(new_df)
-                    QMessageBox.information(self, "Success", f"Forcibly re-ran '{tid}' on row {row_idx}.")
-                    self.auto_save(force=True)
-                    break
