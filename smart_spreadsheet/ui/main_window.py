@@ -1,15 +1,16 @@
 import os
 from datetime import datetime
-
+from ui.application_status_delegate import ApplicationStatusDelegate
 import pandas as pd
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableView, QComboBox, QFileDialog, QMessageBox,
-    QInputDialog, QMenu, QDialog, QToolBar
+    QInputDialog, QMenu, QDialog, QToolBar, QSplitter, QTextEdit,
 )
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import Qt, QPoint
-
+from PyQt6.QtCore import Qt, QPoint, QModelIndex
+from ui.compose_email_dialog import ComposeEmailDialog
+from datetime import datetime
 # Services and UI imports
 from services.settings_service import get_email_account, get_resume_folder
 from ui.settings_dialog import SettingsDialog
@@ -73,10 +74,34 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(top_btn_layout)
 
+        # Splitter for table and reading area
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.current_edit_index = QModelIndex()
+
         # Table View
         self.table_view = QTableView()
         self.table_view.setModel(self.df_model)
-        main_layout.addWidget(self.table_view, stretch=1)
+        self.table_view.setItemDelegate(ApplicationStatusDelegate(self.table_view))
+        self.splitter.addWidget(self.table_view)
+
+        # Reading Area
+        self.reading_area = QTextEdit()
+        self.reading_area.setMinimumHeight(150)  # About 7 rows tall
+        self.reading_area.textChanged.connect(self.update_cell_from_reading_area)
+        self.reading_area.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa;
+                border-top: 2px solid #dee2e6;
+                font-family: monospace;
+                padding: 8px;
+            }
+        """)
+        self.splitter.addWidget(self.reading_area)
+
+        # Set initial splitter sizes (75% table, 25% reading area)
+        self.splitter.setSizes([self.height() * 3 // 4, self.height() // 4])
+        
+        main_layout.addWidget(self.splitter)
 
         # Enable context menus on header and table
         header = self.table_view.horizontalHeader()
@@ -85,13 +110,7 @@ class MainWindow(QMainWindow):
 
         self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self.show_table_context_menu)
-
-        # Add row button
-        add_row_layout = QHBoxLayout()
-        add_row_btn = QPushButton("Add Row")
-        add_row_btn.clicked.connect(self.add_new_row)
-        add_row_layout.addWidget(add_row_btn)
-        main_layout.addLayout(add_row_layout)
+        self.table_view.doubleClicked.connect(self.on_cell_double_clicked)
 
         # Transformation UI
         if self.transformations_dict:
@@ -110,7 +129,6 @@ class MainWindow(QMainWindow):
         self.df_model.dataChanged.connect(self.auto_save)
 
         self.setCentralWidget(main_widget)
-
     def load_user_settings(self):
         """
         Check essential settings (like email credentials, resume folder) AFTER UI is loaded.
@@ -158,12 +176,19 @@ class MainWindow(QMainWindow):
             "CSV Files (*.csv)"
         )
         if not file_path:
-            return  # user canceled
+            return
 
-        # Create empty DataFrame with some default columns
-        df = pd.DataFrame(columns=["Column1", "Column2"])
+        # Predefined columns
+        columns = [
+            "CompanyName", "CompanyWebsite", "Job Title", "Job Description",
+            "Application Status", "Hiring Manager Name", "Hiring Manager LinkedIn",
+            "Hiring Manager Email", "LinkedIn Message", "First Email", 
+            "Second Email", "Phone Number"
+        ]
+        
+        df = pd.DataFrame(columns=columns)
         try:
-            save_data(df, file_path)  # via services.file_service
+            save_data(df, file_path)
             self.df_model.setDataFrame(df)
             self.set_current_file_path(file_path)
         except Exception as e:
@@ -315,14 +340,83 @@ class MainWindow(QMainWindow):
                 if tmeta["output_col"] == col_name:
                     force_rerun_action = menu.addAction(f"Force Re-Run {tid} on This Row")
                     break
+        add_job_action = menu.addAction("Add Job to Company")
+        add_hiring_action = menu.addAction("Add Hiring Member to Job")
+        add_row_action = menu.addAction("Add Row")
+
 
         action = menu.exec(self.table_view.mapToGlobal(pos))
-        print(f"Action: {action}")
-        if action == send_email_action:
+        
+        if action == add_job_action:
+            self.duplicate_row_for_new_job(row_idx)
+        elif action == add_hiring_action:
+            self.duplicate_row_for_new_hiring_manager(row_idx)
+        elif action == send_email_action:
             self.open_compose_dialog_for_row(row_idx)
         elif force_rerun_action and action == force_rerun_action:
             self.force_rerun_for_row(col_name, row_idx)
+        if action == add_row_action:
+            self.add_new_row()
+    def duplicate_row_for_new_job(self, row_idx):
+        df = self.df_model.dataFrame()
+        if row_idx < 0 or row_idx >= len(df):
+            return
 
+        new_row = df.iloc[row_idx].copy()
+        # Reset job-related fields
+        new_row[['Job Title', 'Job Description', "Application Status",
+                'Hiring Manager Name', 'Hiring Manager LinkedIn',
+                'Hiring Manager Email', 'LinkedIn Message',
+                'First Email', 'Second Email', 'Phone Number']] = ''
+
+        self.df_model.insertRows(row_idx, 1)
+        updated_df = self.df_model.dataFrame()
+        updated_df.iloc[row_idx] = new_row
+        self.df_model.setDataFrame(updated_df)
+
+    def duplicate_row_for_new_hiring_manager(self, row_idx):
+        df = self.df_model.dataFrame()
+        if row_idx < 0 or row_idx >= len(df):
+            return
+
+        new_row = df.iloc[row_idx].copy()
+        # Reset hiring manager fields
+        new_row[['Hiring Manager Name', 'Hiring Manager LinkedIn',
+                'Hiring Manager Email', 'LinkedIn Message',
+                'First Email', 'Second Email', 'Phone Number']] = ''
+
+        self.df_model.insertRows(row_idx, 1)
+        updated_df = self.df_model.dataFrame()
+        updated_df.iloc[row_idx] = new_row
+        self.df_model.setDataFrame(updated_df)
+
+    
+    def on_cell_double_clicked(self, index):
+        if not index.isValid():
+            return
+
+        self.current_edit_index = index
+        df = self.df_model.dataFrame()
+        cell_value = str(df.iloc[index.row(), index.column()])
+        col_name = df.columns[index.column()].lower()
+
+        if any(key in col_name for key in ["subject", "body", "email"]):
+            self.open_compose_dialog_for_row(index.row())
+        else:
+            # Block signals to prevent immediate update
+            self.reading_area.blockSignals(True)
+            self.reading_area.setPlainText(cell_value)
+            self.reading_area.blockSignals(False)
+
+    def update_cell_from_reading_area(self):
+        """Update the DataFrame when reading area content changes"""
+        if self.current_edit_index.isValid():
+            new_text = self.reading_area.toPlainText()
+            self.df_model.setData(
+                self.current_edit_index, 
+                new_text, 
+                Qt.ItemDataRole.EditRole
+            )
     def open_compose_dialog_for_row(self, row_idx: int):
         """
         Use the row's data to populate the ComposeEmailDialog.

@@ -62,13 +62,20 @@ class DataFrameModel(QAbstractTableModel):
         return QVariant()
 
     def insertRows(self, row, count=1, parent=QModelIndex()):
-        """
-        Insert new empty rows.
-        """
+        if row < 0 or row > self.rowCount():
+            return False
+
         self.beginInsertRows(QModelIndex(), row, row + count - 1)
-        for _ in range(count):
-            new_row = pd.Series([None]*self.columnCount(), index=self._df.columns, name=len(self._df))
-            self._df = pd.concat([self._df, new_row.to_frame().T])
+        
+        new_rows = pd.DataFrame([{col: None for col in self._df.columns} for _ in range(count)])
+        
+        if self._df.empty:
+            self._df = new_rows
+        else:
+            top = self._df.iloc[:row]
+            bottom = self._df.iloc[row:]
+            self._df = pd.concat([top, new_rows, bottom], ignore_index=True)
+        
         self.endInsertRows()
         return True
 
