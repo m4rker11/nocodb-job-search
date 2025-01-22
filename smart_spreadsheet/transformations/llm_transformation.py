@@ -32,6 +32,28 @@ class MultiLLMTransformation(BaseTransformation):
         chosen once (via transformation config in metadata).
         """
         return ["Prompt Column"]
+    def required_static_params(self):
+        return [
+            {
+                "name": "provider",
+                "type": "combobox",
+                "options": ["OpenAI", "Anthropic", "Ollama", "DeepSeek"],
+                "default": "OpenAI"
+            },
+            {
+                "name": "model",
+                "type": "combobox",
+                "options": [],
+                "editable": True,
+                "description": "Model name based on provider"
+            },
+            {
+                "name": "api_key",
+                "type": "text",
+                "description": "API key (leave blank for environment variable)"
+            }
+        ]
+
 
     def transform(self, df, output_col_name, *args, **kwargs):
         """
@@ -132,3 +154,22 @@ class MultiLLMTransformation(BaseTransformation):
             raise ValueError(f"Ollama error: {resp.status_code} - {resp.text}")
         data = resp.json()
         return data.get("completion", "").strip()
+
+
+    def replace_placeholders(text, row):
+        """Replace {{ColumnName}} with actual values from the row"""
+        from string import Template
+        class SafeTemplate(Template):
+            delimiter = '{{'
+            pattern = r'''
+            \{\{(?:
+            (?P<escaped>\{\{)|
+            (?P<named>[_a-z][_a-z0-9]*)\}\}|
+            (?P<braced>[_a-z][_a-z0-9]*)\}\}|
+            (?P<invalid>)
+            )
+            '''
+        try:
+            return SafeTemplate(text).substitute(**row.to_dict())
+        except:
+            return text  # Return original if error

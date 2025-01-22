@@ -16,6 +16,7 @@ from services.settings_service import get_email_account, get_resume_folder
 from ui.settings_dialog import SettingsDialog
 from ui.data_frame_model import DataFrameModel
 from ui.compose_email_dialog import ComposeEmailDialog
+from ui.transform_dialog import TransformDialog
 from services.file_service import load_data, save_data
 from transformations.utils import find_transformations_in_package
 from transformations.manager import TransformationManager
@@ -525,72 +526,42 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No File", "Load a file first.")
             return
 
-        if not self.trans_manager.transformations_dict:
-            QMessageBox.information(self, "Info", "No transformations found in package.")
+        transform_name = self.transform_combo.currentText()
+        transformation = self.transformations_dict.get(transform_name)
+        
+        if not transformation:
+            QMessageBox.warning(self, "Error", "Transformation not found.")
             return
 
         df = self.df_model.dataFrame()
         if df.empty:
-            QMessageBox.information(self, "Info", "DataFrame is empty; cannot apply transformation.")
+            QMessageBox.warning(self, "Empty Data", "No data to transform.")
             return
 
-        transform_name = self.transform_combo.currentText()
-        transformation = self.trans_manager.transformations_dict[transform_name]
-
-        # Ask user for input columns
-        required_inputs = transformation.required_inputs()
-        chosen_cols = []
-        for label in required_inputs:
-            col_list = df.columns.tolist()
-            if not col_list:
-                QMessageBox.warning(self, "Error", f"No columns available for '{label}'.")
-                return
-            col, ok = QInputDialog.getItem(
-                self, "Select Column", f"Column for '{label}':", col_list, 0, False
-            )
-            if not ok:
-                return
-            chosen_cols.append(col)
-
-        # Ask user for output column name
-        output_col, ok2 = QInputDialog.getText(
-            self, "Output Column", "New Column Name:", text="new_column"
-        )
-        if not ok2 or not output_col:
+        # Get user configuration through dialog
+        dialog = TransformDialog(transformation, df.columns.tolist(), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        # Optional condition expression
-        condition_str, ok3 = QInputDialog.getText(
-            self,
-            "Condition",
-            "Enter a pandas condition (e.g. df['Email'].notnull()):",
-            text="df['Email'].notnull()"
-        )
-        if not ok3:
+        selections = dialog.get_selections()
+        if not selections["output_col"]:
+            QMessageBox.warning(self, "Error", "Output column name is required.")
             return
 
-        # Transform ID
-        transform_id, ok4 = QInputDialog.getText(
-            self, "Transform ID", "Give an ID for this transformation:", text="Enrich1"
-        )
-        if not ok4 or not transform_id.strip():
-            return
+        # Generate unique transform ID
+        transform_id = f"{transform_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-        # Register transformation in the manager metadata
+        # Register transformation
         self.trans_manager.add_transformation(
-            transform_id=transform_id.strip(),
+            transform_id=transform_id,
             transformation_name=transform_name,
-            input_cols=chosen_cols,
-            output_col=output_col.strip(),
-            condition_str=condition_str.strip()
+            input_cols=selections["input_cols"],
+            output_col=selections["output_col"],
+            extra_params=selections["static_params"]
         )
 
-        # Now apply it, which will run or skip rows as needed
+        # Apply transformations
         new_df = self.trans_manager.apply_all_transformations(df)
         self.df_model.setDataFrame(new_df)
-
-        QMessageBox.information(
-            self, "Success",
-            f"Transformation '{transform_id}' applied. Check new column '{output_col}'."
-        )
+        QMessageBox.information(self, "Success", "Transformation applied!")
         self.auto_save(force=True)

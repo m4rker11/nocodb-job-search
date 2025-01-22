@@ -29,7 +29,6 @@ class TransformationManager:
         condition_type: str = None,
         condition_col: str = None,
         condition_value: str = None,
-        condition_str: str = None,  # Accept condition_str for backward compatibility
         extra_params: dict = None
     ):
         """
@@ -52,7 +51,6 @@ class TransformationManager:
             "row_signatures": {},
             "extra_params": extra_params
         }
-
     def save_metadata(self):
         """Persist the metadata to sidecar JSON."""
         save_metadata(self.csv_path, self._metadata)
