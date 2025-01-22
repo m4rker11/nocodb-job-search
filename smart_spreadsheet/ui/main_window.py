@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, QPoint, QModelIndex
 from ui.compose_email_dialog import ComposeEmailDialog
 from datetime import datetime
 # Services and UI imports
-from services.settings_service import get_email_account, get_resume_folder
+from services.settings_service import get_email_account, get_resume_path
 from ui.settings_dialog import SettingsDialog
 from ui.data_frame_model import DataFrameModel
 from ui.compose_email_dialog import ComposeEmailDialog
@@ -136,7 +136,7 @@ class MainWindow(QMainWindow):
         Prompt user if missing.
         """
         email_account = get_email_account()
-        resume_folder = get_resume_folder()
+        resume_folder = get_resume_path()
 
         if not email_account or not resume_folder:
             msg = (

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from string import Template
+import os
 
 class SafeTemplate(Template):
     delimiter = '{{'
@@ -14,9 +15,8 @@ class SafeTemplate(Template):
 
 class BaseTransformation(ABC):
     """
-    Abstract base class for transformations.
+    Abstract base class for transformations with enhanced placeholder support
     """
-
     name = "Base Transformation"
     description = "A base class for transformations"
 
@@ -33,12 +33,32 @@ class BaseTransformation(ABC):
         Return a list describing the input columns or parameters needed.
         """
         pass
+
     @classmethod
     def get_placeholder_wrapper(cls):
-        """Default placeholder replacement method"""
+        """
+        Enhanced placeholder replacement with user info/resume support
+        """
         def replace_placeholders(text, row):
             try:
-                return SafeTemplate(text).substitute(**row.to_dict())
-            except:
+                # Start with row data
+                context = row.to_dict()
+                
+                # Add user info if not already in row
+                if 'user_info' not in context:
+                    if os.path.exists('user_info.txt'):
+                        with open('user_info.txt', 'r', encoding='utf-8') as f:
+                            context['user_info'] = f.read()
+                
+                # Add resume if not already in row
+                if 'user_resume' not in context:
+                    if os.path.exists('user_resume.txt'):
+                        with open('user_resume.txt', 'r', encoding='utf-8') as f:
+                            context['user_resume'] = f.read()
+                
+                # Perform substitution
+                return SafeTemplate(text).substitute(**context)
+            except Exception as e:
+                print(f"Placeholder substitution error: {e}")
                 return text
         return replace_placeholders

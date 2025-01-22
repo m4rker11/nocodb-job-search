@@ -37,6 +37,35 @@ class WizaAPI:
         resp = requests.get(url, headers=self.headers)
         resp.raise_for_status()
         return resp.json()
+    
+    def get_profile_data(self, linkedin_url):
+        """Direct access method for single profile lookup"""
+        reveal_id = self.create_individual_reveal(linkedin_url)
+        max_retries = 5
+        delay = 1
+        max_polling_attempts = 10
+        polling_delay = 5
+
+        for attempt in range(max_retries):
+            try:
+                for polling_attempt in range(max_polling_attempts):
+                    reveal_data = self.get_individual_reveal(reveal_id)
+                    if reveal_data['data']['is_complete']:
+                        return reveal_data
+                    logger.info(
+                        f"[Wiza] Polling attempt {polling_attempt+1}/{max_polling_attempts} for reveal completion."
+                    )
+                    time.sleep(polling_delay)
+                raise TimeoutError("Reveal did not complete within the expected time.")
+            except Exception as e:
+                logger.warning(
+                    f"[Wiza] Retry {attempt+1}/{max_retries} for get_individual_reveal: {e}"
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    delay *= 2
+                else:
+                    raise
 
 class WizaIndividualRevealTransformation(BaseTransformation):
     name = "Wiza Individual Reveal Transformation"
