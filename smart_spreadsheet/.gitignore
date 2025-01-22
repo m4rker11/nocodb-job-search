@@ -1,0 +1,12 @@
+# standard python gitignore stuff
+*.pyc
+*.pyo
+*.pyd
+__pycache__
+# venv
+venv/
+# venv/bin/activate
+venv/bin/activate.csh
+.env
+.csv
+.json

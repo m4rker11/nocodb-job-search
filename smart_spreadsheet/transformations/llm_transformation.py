@@ -1,3 +1,4 @@
+# transformations/llm_transformation.py
 import os
 import time
 import requests
@@ -10,30 +11,24 @@ load_dotenv()
 from transformations.base import BaseTransformation
 
 class MultiLLMTransformation(BaseTransformation):
-    """
-    A transformation that can call:
-      - OpenAI
-      - Anthropic (Claude)
-      - Ollama (self-hosted)
-
-    You configure which provider + model to use in the transformation’s metadata
-    (rather than storing that in each row).
-
-    required_inputs() expects only the Prompt Column. 
-    The provider and model_name will be stored in metadata (or passed as extra kwargs).
-    """
-
     name = "Multi-Provider LLM Transformation"
-    description = "Calls OpenAI, Anthropic, or Ollama with a user-selected provider & model."
+    description = "Calls OpenAI, Anthropic, or Ollama with templated prompts."
 
     def required_inputs(self):
-        """
-        Only the prompt column is mandatory, because the provider/model will be
-        chosen once (via transformation config in metadata).
-        """
-        return ["Prompt Column"]
+        return []  # No direct column inputs
+
     def required_static_params(self):
         return [
+            {
+                "name": "system_prompt",
+                "type": "prompt",
+                "description": "System role prompt template with {{placeholders}}"
+            },
+            {
+                "name": "user_prompt", 
+                "type": "prompt",
+                "description": "User prompt template with {{placeholders}}"
+            },
             {
                 "name": "provider",
                 "type": "combobox",
@@ -54,122 +49,94 @@ class MultiLLMTransformation(BaseTransformation):
             }
         ]
 
+    def transform(self, df, output_col_name, placeholder_wrapper, **kwargs):
+        provider = kwargs.get("provider", "OpenAI").strip().lower()
+        model_name = kwargs.get("model", "gpt-4").strip()
+        system_prompt = kwargs.get("system_prompt", "")
+        user_prompt = kwargs.get("user_prompt", "")
 
-    def transform(self, df, output_col_name, *args, **kwargs):
-        """
-        We expect:
-          - args[0] = the name of the prompt column
-          - kwargs["provider"] = "openai" or "anthropic" or "ollama"
-          - kwargs["model_name"] = model ID/label (e.g. "gpt-4", "claude-2", "llama2-7b" ...)
+        # Initialize clients
+        self._init_clients(kwargs.get("api_key"))
 
-        For each row, we read the prompt from the prompt column,
-        then call the chosen LLM with the same provider & model.
-        """
-        prompt_col = args[0]
-
-        # Extract from metadata / user config
-        provider = kwargs.get("provider", "openai").strip().lower()
-        model_name = kwargs.get("model_name", "gpt-4").strip()
-
-        # Set keys
-        openai_api_key = os.getenv("OPENAI_API_KEY", "")
-        anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
-
-        if not openai_api_key:
-            print("[WARN] OPENAI_API_KEY not set. OpenAI calls will fail if used.")
-        if not anthropic_api_key:
-            print("[WARN] ANTHROPIC_API_KEY not set. Anthropic calls will fail if used.")
-
-        # Set up OpenAI
-        openai.api_key = openai_api_key
-        
-        # Set up Anthropic
-        self.anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
-
-
-        # For each row, get the prompt and call the chosen model
+        # Process prompts for each row
         for idx, row in df.iterrows():
-            prompt_text = str(row[prompt_col])
             try:
-                response = self._call_llm(provider, model_name, prompt_text)
+                final_system = placeholder_wrapper(system_prompt, row)
+                final_user = placeholder_wrapper(user_prompt, row)
+                response = self._call_llm(provider, model_name, final_system, final_user)
                 df.at[idx, output_col_name] = response
             except Exception as e:
                 df.at[idx, output_col_name] = f"ERROR: {e}"
 
         return df
 
-    def _call_llm(self, provider, model_name, prompt_text, max_retries=3):
-        delay = 2  # seconds
+    def _init_clients(self, api_key):
+        self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+        self.anthropic_client = anthropic.Anthropic(
+            api_key=os.getenv("ANTHROPIC_API_KEY", "")
+        )
+
+    def _call_llm(self, provider, model_name, system_prompt, user_prompt, max_retries=3):
+        delay = 2
         for attempt in range(max_retries):
             try:
                 if provider == "openai":
-                    return self._call_openai(model_name, prompt_text)
+                    return self._call_openai(model_name, system_prompt, user_prompt)
                 elif provider == "anthropic":
-                    return self._call_anthropic(model_name, prompt_text)
+                    return self._call_anthropic(model_name, system_prompt, user_prompt)
                 elif provider == "ollama":
-                    return self._call_ollama(model_name, prompt_text)
+                    return self._call_ollama(model_name, user_prompt)
                 else:
                     raise ValueError(f"Unknown provider: {provider}")
             except Exception as e:
                 if attempt < max_retries - 1:
                     time.sleep(delay)
-                    delay *= 2  # exponential backoff
+                    delay *= 2
                 else:
                     raise e
 
-    def _call_openai(self, model_name, prompt_text):
-        # Create an OpenAI client instance
-        client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-        # Use the client to create a chat completion
-        completion = client.chat.completions.create(
+    def _call_openai(self, model_name, system_prompt, user_prompt):
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        completion = self.openai_client.chat.completions.create(
             model=model_name,
-            messages=[{"role": "user", "content": prompt_text}],
+            messages=messages,
             temperature=0.7,
         )
-        
-        # Access the message content using dot notation
         return completion.choices[0].message.content.strip()
-    def _call_anthropic(self, model_name, prompt_text):
-        # Example usage: anthropic Claude
-        resp = self.anthropic_client.completions.create(
-            model=model_name, 
-            max_tokens_to_sample=8000,
-            prompt=f"{anthropic.HUMAN_PROMPT} {prompt_text}{anthropic.AI_PROMPT}",
+
+    def _call_anthropic(self, model_name, system_prompt, user_prompt):
+        message = self.anthropic_client.messages.create(
+            model=model_name,
+            system=system_prompt,
+            max_tokens=4000,
+            messages=[{"role": "user", "content": user_prompt}],
             temperature=0.7,
         )
-        return resp.completion.strip()
+        return message.content[0].text.strip()
 
-    def _call_ollama(self, model_name, prompt_text):
-        # Example usage for local Ollama
-        url = "http://localhost:11411/generate"
+    def _call_ollama(self, model_name, user_prompt):
+        url = "http://localhost:11434/api/generate"
         payload = {
-            "prompt": prompt_text,
             "model": model_name,
-            "temperature": 0.7,
+            "prompt": user_prompt,
+            "stream": False,
+            "temperature": 0.7
         }
-        headers = {"Content-Type": "application/json"}
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        resp = requests.post(url, json=payload, timeout=120)
         if resp.status_code != 200:
             raise ValueError(f"Ollama error: {resp.status_code} - {resp.text}")
-        data = resp.json()
-        return data.get("completion", "").strip()
+        return resp.json().get("response", "").strip()
 
-
+    @staticmethod
     def replace_placeholders(text, row):
-        """Replace {{ColumnName}} with actual values from the row"""
-        from string import Template
-        class SafeTemplate(Template):
-            delimiter = '{{'
-            pattern = r'''
-            \{\{(?:
-            (?P<escaped>\{\{)|
-            (?P<named>[_a-z][_a-z0-9]*)\}\}|
-            (?P<braced>[_a-z][_a-z0-9]*)\}\}|
-            (?P<invalid>)
-            )
-            '''
         try:
             return SafeTemplate(text).substitute(**row.to_dict())
         except:
-            return text  # Return original if error
+            return text
+        
+    @classmethod
+    def get_placeholder_wrapper(cls):
+        return super().get_placeholder_wrapper()  # Use base implementation

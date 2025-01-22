@@ -538,8 +538,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Empty Data", "No data to transform.")
             return
 
-        # Get user configuration through dialog
-        dialog = TransformDialog(transformation, df.columns.tolist(), self)
+        # Get placeholder handler from the transformation
+        placeholder_wrapper = transformation.get_placeholder_wrapper()
+
+        # Create dialog with required parameters
+        dialog = TransformDialog(
+            transformation=transformation,
+            df_columns=df.columns.tolist(),
+            placeholder_wrapper=placeholder_wrapper,
+            parent=self
+        )
+
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
