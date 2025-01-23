@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTextEdit, QPushButton, QMessageBox
 )
-from services.email_service import send_email_smtp
+from services.email_service import EmailService
 
 class ComposeEmailDialog(QDialog):
     def __init__(self, to_email="", subject="", body="", parent=None):
@@ -57,8 +57,8 @@ class ComposeEmailDialog(QDialog):
         if not to_addr:
             QMessageBox.warning(self, "Missing To", "Recipient email is required.")
             return
-
-        success, msg = send_email_smtp(to_addr, subject, body)
+        service = EmailService()
+        success, msg = service.send_email(to_addr, subject, body)
         if success:
             QMessageBox.information(self, "Success", "Email sent successfully!")
             self.accept()

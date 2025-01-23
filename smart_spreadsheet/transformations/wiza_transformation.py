@@ -4,9 +4,8 @@ import time
 import requests
 import pandas as pd
 from dotenv import load_dotenv
-
 from transformations.base import BaseTransformation
-
+from transformations.reoon_transformation import ReoonVerifierClient
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -26,6 +25,7 @@ class WizaAPI:
         payload = {
             "individual_reveal": {"profile_url": linkedin},
             "enrichment_level": enrichment_level,
+            "email_options": {"accept_work": True, "accept_personal": True},
             "callback_url": None,
         }
         resp = requests.post(url, headers=self.headers, json=payload)
@@ -69,69 +69,76 @@ class WizaAPI:
 
 class WizaIndividualRevealTransformation(BaseTransformation):
     name = "Wiza Individual Reveal Transformation"
-    description = "Performs an individual reveal using the Wiza API."
+    description = "Extracts verified emails and professional information from LinkedIn profiles."
+    predefined_output = True  # Override the flag
+    output_columns = [  # Define fixed columns
+        'Personal Email', 
+        'Work Email',  
+        'Summary'
+    ]
 
     def required_inputs(self):
-        """
-        We need three columns: Full Name, Company, Domain.
-        """
         return ["Linkedin"]
 
     def transform(self, df, output_col_name, *args):
+        # Ignore output_col_name since we're using predefined columns
         linkedin_col = args[0]
         wiza_api = WizaAPI()
+        reoon_client = ReoonVerifierClient()
+
+        # Initialize all output columns if missing
+        for col in self.output_columns:
+            if col not in df.columns:
+                df[col] = None
 
         def perform_reveal(row):
-            linkedin = row[linkedin_col]
+            linkedin_url = row[linkedin_col]
+            if pd.isna(linkedin_url) or not linkedin_url.strip():
+                return row
 
-            # Actually call the reveal
-            reveal_id = self._create_reveal_with_backoff(wiza_api, linkedin)
-            reveal_data = self._get_reveal_with_backoff(wiza_api, reveal_id)
-            return reveal_data
-
-        df[output_col_name] = df.apply(perform_reveal, axis=1)
-        return df
-
-    def _create_reveal_with_backoff(self, wiza_api,linkedin):
-        max_retries = 5
-        delay = 1
-
-        for attempt in range(max_retries):
             try:
-                return wiza_api.create_individual_reveal(linkedin)
-            except Exception as e:
-                logger.warning(
-                    f"[Wiza] Retry {attempt+1}/{max_retries} for create_individual_reveal: {e}"
-                )
-                if attempt < max_retries - 1:
-                    time.sleep(delay)
-                    delay *= 2
-                else:
-                    raise
+                reveal_data = wiza_api.get_profile_data(linkedin_url)
+                print(f"Reveal data: {reveal_data}")
+                data = reveal_data.get('data', {})
+                
+                # Extract and verify emails
+                personal_email, work_email = self._process_emails(data, reoon_client)
+                
+                # Build professional summary
+                summary = self._build_summary(data)
 
-    def _get_reveal_with_backoff(self, wiza_api, reveal_id):
-        max_retries = 5
-        delay = 1
-        max_polling_attempts = 10
-        polling_delay = 5
+                # Update row with extracted data
+                row['Personal Email'] = personal_email
+                row['Work Email'] = work_email
+                row['Summary'] = summary
 
-        for attempt in range(max_retries):
-            try:
-                for polling_attempt in range(max_polling_attempts):
-                    reveal_data = wiza_api.get_individual_reveal(reveal_id)
-                    if reveal_data['data']['is_complete']:
-                        return reveal_data
-                    logger.info(
-                        f"[Wiza] Polling attempt {polling_attempt+1}/{max_polling_attempts} for reveal completion."
-                    )
-                    time.sleep(polling_delay)
-                raise TimeoutError("Reveal did not complete within the expected time.")
             except Exception as e:
-                logger.warning(
-                    f"[Wiza] Retry {attempt+1}/{max_retries} for get_individual_reveal: {e}"
-                )
-                if attempt < max_retries - 1:
-                    time.sleep(delay)
-                    delay *= 2
-                else:
-                    raise
+                logger.error(f"[Wiza] Error processing row: {e}")
+
+            return row
+
+        return df.apply(perform_reveal, axis=1)
+
+    def _process_emails(self, data, reoon_client):
+        personal_email = None
+        work_email = None
+        for email_info in data.get('emails', []):
+            email = email_info.get('email')
+            if not email:
+                continue
+                
+            if reoon_client.verify_email(email):
+                email_type = email_info.get('email_type', '').lower()
+                if email_type == 'personal':
+                    personal_email = email
+                elif email_type == 'work':
+                    work_email = email
+        return personal_email, work_email
+
+
+
+    def _build_summary(self, data):
+        summary_parts = []
+        for field in ['summary', 'company description', 'name', 'title', 'location', 'subtitle', 'certifications', 'education', 'work_history']:
+            summary_parts.append(f"\n\n{data.get(field)}")
+        return ' - '.join(summary_parts) if summary_parts else None

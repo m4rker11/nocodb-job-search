@@ -112,12 +112,14 @@ class TransformDialog(QDialog):
 
         # Model descriptions
         
-        # Output column
-        self.output_edit = QLineEdit()
-        output_layout = QHBoxLayout()
-        output_layout.addWidget(QLabel("Output Column:"))
-        output_layout.addWidget(self.output_edit)
-        self.layout.addLayout(output_layout)
+        # Only show output field if transformation doesn't have predefined outputs
+        if not transformation.predefined_output:
+            self.output_edit = QLineEdit()
+            output_layout = QHBoxLayout()
+            output_layout.addWidget(QLabel("Output Column:"))
+            output_layout.addWidget(self.output_edit)
+            self.layout.addLayout(output_layout)
+
 
         # Dialog buttons
         self.button_box = QDialogButtonBox(
@@ -148,15 +150,22 @@ class TransformDialog(QDialog):
         """)
 
     def get_selections(self):
-        return {
+        selections = {
             "input_cols": [w.currentText() for w in self.input_col_widgets],
-            "output_col": self.output_edit.text().strip(),
             "static_params": {
                 name: widget.currentText() if isinstance(widget, QComboBox) else widget.text()
                 for name, widget in self.static_params_widgets.items()
             },
             "placeholder_wrapper": self.placeholder_wrapper
         }
+        
+        # Only include output column if transformation allows custom output
+        if not self.transformation.predefined_output:
+            selections["output_col"] = self.output_edit.text().strip()
+        else:
+            selections["output_col"] = None  # Explicitly set to None
+
+        return selections
 
     def _create_param_row(self, param):
         row = QHBoxLayout()

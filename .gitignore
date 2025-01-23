@@ -10,3 +10,12 @@ venv/bin/activate.csh
 .env
 .csv
 .json
+email_credentials.json
+email_token.json
+.gitignore
+lastfile.txt
+*.csv
+*.json
+todo
+user_info.txt
+user_resume.txt

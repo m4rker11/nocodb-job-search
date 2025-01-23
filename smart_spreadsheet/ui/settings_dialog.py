@@ -1,11 +1,11 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QWidget, QFormLayout,
-    QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QMessageBox
+    QLineEdit, QPushButton, QTextEdit, QHBoxLayout, QLabel,
 )
 from PyQt6.QtCore import Qt
 from services.settings_service import (
     get_linkedin_url, set_linkedin_url,
-    get_resume_path, set_resume_path,
+    get_resume_text, set_resume_text,
     get_email_account, set_email_account,
     get_email_password, set_email_password,
     load_env_vars, get_env_var, set_env_var
@@ -15,7 +15,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Application Settings")
-        self.setMinimumSize(600, 400)
+        self.setMinimumSize(800, 600)
         
         main_layout = QVBoxLayout()
         self.tab_widget = QTabWidget()
@@ -53,40 +53,24 @@ class SettingsDialog(QDialog):
         self.setLayout(main_layout)
 
     def _setup_personal_tab(self):
-        layout = QFormLayout()
+        layout = QVBoxLayout()
 
         # LinkedIn URL
+        linkedin_layout = QHBoxLayout()
+        linkedin_layout.addWidget(QLabel("LinkedIn URL:"))
         self.linkedin_edit = QLineEdit()
         self.linkedin_edit.setText(get_linkedin_url())
-        layout.addRow("LinkedIn URL:", self.linkedin_edit)
+        linkedin_layout.addWidget(self.linkedin_edit)
+        layout.addLayout(linkedin_layout)
 
-        # Resume Upload
-        resume_widget = QWidget()
-        resume_layout = QHBoxLayout()
-        
-        self.resume_edit = QLineEdit()
-        self.resume_edit.setText(get_resume_path())
-        self.resume_edit.setReadOnly(True)
-        resume_layout.addWidget(self.resume_edit)
-        
-        browse_btn = QPushButton("Upload Resume...")
-        browse_btn.clicked.connect(self._upload_resume)
-        resume_layout.addWidget(browse_btn)
-        
-        resume_widget.setLayout(resume_layout)
-        layout.addRow("Resume File:", resume_widget)
+        # Resume Text
+        layout.addWidget(QLabel("Resume Text:"))
+        self.resume_edit = QTextEdit()
+        self.resume_edit.setPlainText(get_resume_text())
+        self.resume_edit.setPlaceholderText("Paste your resume text here...")
+        layout.addWidget(self.resume_edit)
 
         self.personal_tab.setLayout(layout)
-
-    def _upload_resume(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Select Resume", 
-            "", 
-            "Documents (*.pdf *.docx)"
-        )
-        if file_path:
-            self.resume_edit.setText(file_path)
 
     def _setup_email_tab(self):
         layout = QFormLayout()
@@ -103,15 +87,6 @@ class SettingsDialog(QDialog):
         self.email_tab.setLayout(layout)
 
     def _setup_env_tab(self):
-        """
-        Create UI fields for environment variables we care about:
-          - OPENAI_API_KEY
-          - ANTHROPIC_API_KEY
-          - WIZA_API_KEY
-          - OLLAMA_URL
-          - OLLAMA_MODEL
-          - REOON_API_KEY
-        """
         layout = QFormLayout()
 
         self.openai_api_edit = QLineEdit()
@@ -125,7 +100,6 @@ class SettingsDialog(QDialog):
         self.wiza_api_edit = QLineEdit()
         self.wiza_api_edit.setText(get_env_var("WIZA_API_KEY"))
         layout.addRow("Wiza API Key:", self.wiza_api_edit)
-
 
         self.reoon_api_edit = QLineEdit()
         self.reoon_api_edit.setText(get_env_var("REOON_API_KEY"))
@@ -142,11 +116,11 @@ class SettingsDialog(QDialog):
         self.env_tab.setLayout(layout)
 
     def accept(self):
-        # Update resume path first to trigger parsing
-        set_resume_path(self.resume_edit.text().strip())
-        
         # Update LinkedIn URL to trigger Wiza lookup
         set_linkedin_url(self.linkedin_edit.text().strip())
+        
+        # Update resume text
+        set_resume_text(self.resume_edit.toPlainText().strip())
         
         # Update email settings
         set_email_account(self.email_account_edit.text().strip())

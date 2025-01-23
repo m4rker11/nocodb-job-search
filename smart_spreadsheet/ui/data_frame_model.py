@@ -56,7 +56,9 @@ class DataFrameModel(QAbstractTableModel):
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole:
             if orientation == Qt.Orientation.Horizontal:
-                return str(self._df.columns[section])
+                col_name = str(self._df.columns[section])
+                display_name = col_name.replace('_', ' ')  # Convert underscores to spaces
+                return display_name
             else:
                 return str(self._df.index[section])
         return QVariant()
@@ -78,7 +80,17 @@ class DataFrameModel(QAbstractTableModel):
         
         self.endInsertRows()
         return True
-
+    def removeRows(self, row: int, count: int, parent=QModelIndex()) -> bool:
+        try:
+            self.beginRemoveRows(parent, row, row + count - 1)
+            self._df = self._df.drop(
+                index=range(row, row + count)
+            ).reset_index(drop=True)
+            self.endRemoveRows()
+            return True
+        except Exception as e:
+            print(f"Error removing rows: {e}")
+            return False
     def removeColumn(self, col_idx: int):
         self.beginResetModel()
         col_name = self._df.columns[col_idx]

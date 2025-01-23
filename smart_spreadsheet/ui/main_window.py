@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, QPoint, QModelIndex
 from ui.compose_email_dialog import ComposeEmailDialog
 from datetime import datetime
 # Services and UI imports
-from services.settings_service import get_email_account, get_resume_path
+from services.settings_service import get_email_account, get_resume_text
 from ui.settings_dialog import SettingsDialog
 from ui.data_frame_model import DataFrameModel
 from ui.compose_email_dialog import ComposeEmailDialog
@@ -45,6 +45,8 @@ class MainWindow(QMainWindow):
 
         # After building UI, load/check user settings
         self.load_user_settings()
+        self.check_and_load_last_file() 
+
 
     def init_ui(self):
         """
@@ -136,7 +138,7 @@ class MainWindow(QMainWindow):
         Prompt user if missing.
         """
         email_account = get_email_account()
-        resume_folder = get_resume_path()
+        resume_folder = get_resume_text()
 
         if not email_account or not resume_folder:
             msg = (
@@ -147,7 +149,16 @@ class MainWindow(QMainWindow):
                                          QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
             if result == QMessageBox.StandardButton.Ok:
                 self.open_settings_dialog()
-
+    def check_and_load_last_file(self):
+        """Check for lastfile.txt and load the file if it exists and is valid."""
+        if os.path.exists('lastfile.txt'):
+            try:
+                with open('lastfile.txt', 'r') as f:
+                    last_path = f.read().strip()
+                if last_path and os.path.exists(last_path):
+                    self.load_file(last_path)
+            except Exception as e:
+                print(f"Error loading last file: {e}")
     # ------------------------------------------------------
     # SETTINGS DIALOG
     # ------------------------------------------------------
@@ -181,10 +192,10 @@ class MainWindow(QMainWindow):
 
         # Predefined columns
         columns = [
-            "CompanyName", "CompanyWebsite", "Job Title", "Job Description",
-            "Application Status", "Hiring Manager Name", "Hiring Manager LinkedIn",
-            "Hiring Manager Email", "LinkedIn Message", "First Email", 
-            "Second Email", "Phone Number"
+            "CompanyName", "CompanyWebsite", "Job_Title", "Job_Description",
+            "Application_Status", "Hiring_Manager_Name", "Hiring_Manager_LinkedIn",
+            "Hiring_Manager_Email", "LinkedIn_Message", "First_Email", 
+            "Second_Email", "Phone_Number"
         ]
         
         df = pd.DataFrame(columns=columns)
@@ -217,6 +228,7 @@ class MainWindow(QMainWindow):
     def load_file(self, file_path):
         try:
             df = load_data(file_path)
+            df.columns = [col.replace(' ', '_') for col in df.columns]
             self.df_model.setDataFrame(df)
             self.set_current_file_path(file_path)
 
@@ -232,7 +244,14 @@ class MainWindow(QMainWindow):
 
     def set_current_file_path(self, path: str):
         self.current_file_path = path
-        # Now that a file is loaded, switch button text to "Save File"
+        # Update lastfile.txt when a valid path is set
+        if path:
+            try:
+                with open('lastfile.txt', 'w') as f:
+                    f.write(path)
+            except Exception as e:
+                print(f"Error saving last file path: {e}")
+        # Update button text
         if self.current_file_path:
             self.create_save_button.setText("Save File")
         else:
@@ -300,6 +319,7 @@ class MainWindow(QMainWindow):
         delete_action = menu.addAction("Delete Column")
         dtype_action = menu.addAction("Change Data Type")
         add_column_action = menu.addAction("Add Column")
+        add_row_action = menu.addAction("Add Row")
 
         action = menu.exec(self.table_view.horizontalHeader().mapToGlobal(pos))
         if action == rename_action:
@@ -310,6 +330,8 @@ class MainWindow(QMainWindow):
             self.delete_column(col_index)
         elif action == dtype_action:
             self.change_column_dtype(col_index)
+        elif action == add_row_action:
+            self.add_new_row()
 
     # ------------------------------------------------------
     # UNIFIED TABLE CONTEXT MENU
@@ -344,8 +366,10 @@ class MainWindow(QMainWindow):
         add_job_action = menu.addAction("Add Job to Company")
         add_hiring_action = menu.addAction("Add Hiring Member to Job")
         add_row_action = menu.addAction("Add Row")
-
-
+        # NEW: Delete Row action
+        delete_row_action = None
+        if index.isValid():
+            delete_row_action = menu.addAction("Delete Row")
         action = menu.exec(self.table_view.mapToGlobal(pos))
         
         if action == add_job_action:
@@ -356,8 +380,10 @@ class MainWindow(QMainWindow):
             self.open_compose_dialog_for_row(row_idx)
         elif force_rerun_action and action == force_rerun_action:
             self.force_rerun_for_row(col_name, row_idx)
-        if action == add_row_action:
+        elif action == add_row_action:
             self.add_new_row()
+        elif action == delete_row_action and index.isValid():
+            self.delete_row(index.row())
     def duplicate_row_for_new_job(self, row_idx):
         df = self.df_model.dataFrame()
         if row_idx < 0 or row_idx >= len(df):
@@ -470,14 +496,42 @@ class MainWindow(QMainWindow):
                 )
                 self.auto_save(force=True)
                 break
+    def delete_row(self, row_idx: int):
+        """Delete a row from the DataFrame with confirmation"""
+        df = self.df_model.dataFrame()
+        if row_idx < 0 or row_idx >= len(df):
+            return
 
+        reply = QMessageBox.question(
+            self,
+            "Delete Row",
+            f"Are you sure you want to delete row {row_idx+1}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Remove the row from the model
+                self.df_model.removeRows(row_idx, 1)
+                QMessageBox.information(
+                    self, 
+                    "Success", 
+                    f"Row {row_idx+1} deleted successfully."
+                )
+            except Exception as e:
+                QMessageBox.critical(
+                    self, 
+                    "Error", 
+                    f"Could not delete row:\n{str(e)}"
+                )
     def add_new_column(self):
         new_name, ok = QInputDialog.getText(
             self, "Add Column", "Enter name for the new column:"
         )
         if ok and new_name.strip():
             try:
-                self.df_model.insertColumn(new_name.strip())
+                internal_name = new_name.strip().replace(' ', '_')
+                self.df_model.insertColumn(internal_name)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not add column:\n{e}")
 
@@ -488,7 +542,8 @@ class MainWindow(QMainWindow):
             self, "Rename Column", f"Enter a new name for '{old_name}':"
         )
         if ok and new_name.strip():
-            self.df_model.renameColumn(col_index, new_name.strip())
+            internal_name = new_name.strip().replace(' ', '_')
+            self.df_model.renameColumn(col_index, internal_name)
 
     def delete_column(self, col_index):
         df = self.df_model.dataFrame()
@@ -553,10 +608,9 @@ class MainWindow(QMainWindow):
             return
 
         selections = dialog.get_selections()
-        if not selections["output_col"]:
+        if not transformation.predefined_output and not selections["output_col"]:
             QMessageBox.warning(self, "Error", "Output column name is required.")
             return
-
         # Generate unique transform ID
         transform_id = f"{transform_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
 

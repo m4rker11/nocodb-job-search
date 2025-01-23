@@ -1,17 +1,10 @@
-1. Create transformation menu for each column that is a transformation
-2. Somewhere to store the resumes and resume description
-3. Modal to see the individual application: eg answer to questions, email, etc
-3.1 The AI output transformation type needs to have the Modal
-4. Reading the email responses and looking for those from the same people 
-5. integrate wiza
-6. integrate Muraena
-7. integrate webscraper
-8. integrate AI calls
+5. Create Default Prompts
+   a. Answer Job Description Questions
+   b. Write 300 char linkedin Message (make this a transformation based on LLM)
+   c. Write Email 1
+   d. Write Email 2
+6. Create the default Table with prebuilt enrichment flow
 
 
 TO TEST
-connecting and sending emails
-wiza
-Reoon
-Scraper
-ai calls
+Reading the email responses and looking for those from the same people (email addresses)

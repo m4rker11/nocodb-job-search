@@ -8,3 +8,11 @@ anthropic
 requests
 python-dotenv
 scrapfly-sdk
+google-auth 
+google-auth-oauthlib 
+google-auth-httplib2 
+google-api-python-client
+playwright 
+playwright-stealth
+beautifulsoup4 
+lxml

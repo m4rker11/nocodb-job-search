@@ -8,7 +8,7 @@ import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
 
-from transformations.base import BaseTransformation
+from transformations.base import BaseTransformation, SafeTemplate
 
 class MultiLLMTransformation(BaseTransformation):
     name = "Multi-Provider LLM Transformation"
@@ -40,7 +40,8 @@ class MultiLLMTransformation(BaseTransformation):
                 "type": "combobox",
                 "options": [],
                 "editable": True,
-                "description": "Model name based on provider"
+                "description": "Model name based on provider",
+                "default": "gpt-4o-mini"
             },
             {
                 "name": "api_key",
@@ -49,20 +50,22 @@ class MultiLLMTransformation(BaseTransformation):
             }
         ]
 
-    def transform(self, df, output_col_name, placeholder_wrapper, **kwargs):
+    def transform(self, df, output_col_name, **kwargs):
         provider = kwargs.get("provider", "OpenAI").strip().lower()
-        model_name = kwargs.get("model", "gpt-4").strip()
+        model_name = kwargs.get("model", "gpt-4o-mini").strip()
         system_prompt = kwargs.get("system_prompt", "")
         user_prompt = kwargs.get("user_prompt", "")
 
         # Initialize clients
         self._init_clients(kwargs.get("api_key"))
-
+        placeholder_wrapper = self.get_placeholder_wrapper()
         # Process prompts for each row
         for idx, row in df.iterrows():
             try:
                 final_system = placeholder_wrapper(system_prompt, row)
                 final_user = placeholder_wrapper(user_prompt, row)
+                print(f"System Prompt: {final_system}")
+                print(f"User Prompt: {final_user}")
                 response = self._call_llm(provider, model_name, final_system, final_user)
                 df.at[idx, output_col_name] = response
             except Exception as e:
@@ -129,14 +132,3 @@ class MultiLLMTransformation(BaseTransformation):
         if resp.status_code != 200:
             raise ValueError(f"Ollama error: {resp.status_code} - {resp.text}")
         return resp.json().get("response", "").strip()
-
-    @staticmethod
-    def replace_placeholders(text, row):
-        try:
-            return SafeTemplate(text).substitute(**row.to_dict())
-        except:
-            return text
-        
-    @classmethod
-    def get_placeholder_wrapper(cls):
-        return super().get_placeholder_wrapper()  # Use base implementation

@@ -19,6 +19,7 @@ class BaseTransformation(ABC):
     """
     name = "Base Transformation"
     description = "A base class for transformations"
+    predefined_output = False  # Add this class variable
 
     @abstractmethod
     def transform(self, df, output_col_name, *args):
@@ -43,7 +44,6 @@ class BaseTransformation(ABC):
             try:
                 # Start with row data
                 context = row.to_dict()
-                
                 # Add user info if not already in row
                 if 'user_info' not in context:
                     if os.path.exists('user_info.txt'):
