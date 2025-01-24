@@ -15,6 +15,7 @@ from datetime import datetime
 from services.settings_service import get_email_account, get_resume_text
 from ui.settings_dialog import SettingsDialog
 from ui.data_frame_model import DataFrameModel
+from ui.column_row_delegate import ColumnRoleDelegate
 from ui.compose_email_dialog import ComposeEmailDialog
 from ui.transform_dialog import TransformDialog
 from services.file_service import load_data, save_data
@@ -46,11 +47,11 @@ class MainWindow(QMainWindow):
         self.init_headers()
         # After building UI, load/check user settings
         self.load_user_settings()
-        self.check_and_load_last_file() 
+        self.check_and_load_last_file()
         # Initialize default transformations if new file
         if not self.current_file_path:
             self.setup_default_transformations()
-        
+
 
     def init_ui(self):
         """
@@ -88,7 +89,19 @@ class MainWindow(QMainWindow):
         # Table View
         self.table_view = QTableView()
         self.table_view.setModel(self.df_model)
-        self.table_view.setItemDelegate(ApplicationStatusDelegate(self.table_view))
+
+        # Initialize header with role-checking function
+        self.header = TransformationHeader(
+            get_column_role=self.get_column_role,  # Pass the method
+            parent=self.table_view
+        )
+        self.table_view.setHorizontalHeader(self.header)
+        self.table_view.setItemDelegate(ColumnRoleDelegate(get_column_role=self.get_column_role, parent=self.table_view))
+        if "Application_Status" in self.df_model.dataFrame().columns:
+            self.table_view.setItemDelegateForColumn(
+                self.df_model.dataFrame().columns.get_loc("Application_Status"),
+                ApplicationStatusDelegate(self.table_view)
+            )
         self.splitter.addWidget(self.table_view)
 
         # Reading Area
@@ -102,42 +115,11 @@ class MainWindow(QMainWindow):
                 font-family: monospace;
                 padding: 8px;
             }
-            TransformationHeader::section {
-                background: #f8f9fa;
-                border-right: 1px solid #dee2e6;
-                padding-right: 24px;
-            }
-            TransformationHeader::section:hover {
-                background: #e9ecef;
-            }
         """)
-        self.setStyleSheet("""
-            /* Header Styles */
-            TransformationHeader::section {
-                background: #f8f9fa;
-                border-right: 1px solid #dee2e6;
-                padding-right: 24px;
-            }
-            TransformationHeader::section:hover {
-                background: #e9ecef;
-            }
-
-            /* Status Column */
-            QTableView::item[column="Application_Status"] {
-                font-style: italic;
-                color: #6c757d;
-            }
-
-            /* Action Columns */
-            QTableView::item[transform="true"] {
-                background: #f8f9fa;
-            }
-            """)
         self.splitter.addWidget(self.reading_area)
 
         # Set initial splitter sizes (75% table, 25% reading area)
         self.splitter.setSizes([self.height() * 3 // 4, self.height() // 4])
-        
         main_layout.addWidget(self.splitter)
 
         # Enable context menus on header and table
@@ -164,11 +146,12 @@ class MainWindow(QMainWindow):
 
         # Auto-save on data change
         self.df_model.dataChanged.connect(self.auto_save)
+        self.df_model.dataChanged.connect(lambda: self.table_view.viewport().update())
 
         self.setCentralWidget(main_widget)
+    
     def init_headers(self):
         """Initialize custom header with action buttons"""
-        self.header = TransformationHeader(self.table_view)
         self.table_view.setHorizontalHeader(self.header)
         self.header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.header.customContextMenuRequested.connect(self.on_header_context_menu)
@@ -393,6 +376,17 @@ class MainWindow(QMainWindow):
         dtype_action = menu.addAction("Change Data Type")
         add_column_action = menu.addAction("Add Column")
         add_row_action = menu.addAction("Add Row")
+
+        # Add transformation actions if applicable
+        if self.trans_manager:
+            col_name = self.df_model.dataFrame().columns[col_index]
+            transforms = []
+            for tid, tmeta in self.trans_manager.get_metadata()["transformations"].items():
+                if tmeta["output_col"] == col_name:
+                    transforms.append((tid, tmeta))
+            for tid, tmeta in transforms:
+                action = menu.addAction(f"Re-run {tmeta['transformation_name']} on All Rows")
+                action.triggered.connect(lambda checked, tid=tid: self.force_rerun_transformation(tid))
 
         action = menu.exec(self.table_view.horizontalHeader().mapToGlobal(pos))
         if action == rename_action:
@@ -753,3 +747,33 @@ class MainWindow(QMainWindow):
             input_cols=["LLM_Analysis"],
             output_col=None  # Uses predefined outputs
         )
+
+    def get_column_roles(self):
+        """Return a dict mapping column names to 'input' or 'output'."""
+        column_roles = {}
+        if not self.trans_manager:
+            return column_roles
+        metadata = self.trans_manager.get_metadata()
+        for t_meta in metadata.get("transformations", {}).values():
+            for input_col in t_meta.get("input_cols", []):
+                column_roles[input_col] = 'input'
+            output_col = t_meta.get("output_col")
+            if output_col:
+                column_roles[output_col] = 'output'
+        return column_roles
+
+    def get_column_role(self, column_index: int) -> str | None:
+        """Check if a column is input/output for transformations"""
+        if not self.trans_manager or column_index < 0:
+            return None
+
+        df = self.df_model.dataFrame()
+        col_name = df.columns[column_index]
+
+        # Check all transformations for input/output
+        for t_meta in self.trans_manager.get_metadata()["transformations"].values():
+            if col_name in t_meta.get("input_cols", []):
+                return 'input'
+            if col_name == t_meta.get("output_col"):
+                return 'output'
+        return None

@@ -100,28 +100,20 @@ class TransformationManager:
 
         return df
 
-    def force_rerun_transformation(
-        self,
-        df: pd.DataFrame,
-        transform_id: str,
-        row_idx: int
-    ) -> pd.DataFrame:
-        """
-        Force a re-run on a single row, ignoring the old signature or condition.
-        """
-        meta = self._metadata["transformations"].get(transform_id)
+    def force_rerun_transformation(self, transform_id):
+        """Force re-run a transformation on all rows."""
+        df = self.df_model.dataFrame()
+        if df.empty:
+            return
+        # Clear all row signatures for this transformation
+        meta = self.trans_manager.get_metadata()["transformations"].get(transform_id)
         if not meta:
-            # Unknown transformation
-            return df
-
-        # Actually run transformation logic on that row
-        df = self.run_transformation_row(df, transform_id, row_idx)
-
-        # Recompute and store new signature
-        new_sig = self.compute_row_signature(df, row_idx, meta["input_cols"])
-        meta["row_signatures"][str(row_idx)] = new_sig
-
-        return df
+            return
+        meta["row_signatures"].clear()
+        # Apply transformation
+        new_df = self.trans_manager.apply_all_transformations(df)
+        self.df_model.setDataFrame(new_df)
+        self.auto_save(force=True)
 
     def run_transformation_row(self, df: pd.DataFrame, transform_id: str, row_idx: int) -> pd.DataFrame:
         """

@@ -9,7 +9,7 @@ class ApplicationStatusDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         model = index.model()
         col_name = model.headerData(index.column(), Qt.Orientation.Horizontal)
-        if col_name == "Application Status":
+        if col_name == "Application_Status":
             editor = QComboBox(parent)
             editor.addItems(self.options)
             return editor
