@@ -98,7 +98,6 @@ class WizaIndividualRevealTransformation(BaseTransformation):
 
             try:
                 reveal_data = wiza_api.get_profile_data(linkedin_url)
-                print(f"Reveal data: {reveal_data}")
                 data = reveal_data.get('data', {})
                 
                 # Extract and verify emails

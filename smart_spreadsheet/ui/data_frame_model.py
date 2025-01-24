@@ -117,3 +117,10 @@ class DataFrameModel(QAbstractTableModel):
         self.beginResetModel()
         self._df[col_name] = None
         self.endResetModel()
+    def clear_columns(self, columns, row_idx):
+        """Clear specific columns in a row"""
+        self.beginResetModel()
+        for col in columns:
+            if col in self._df.columns:
+                self._df.at[row_idx, col] = None
+        self.endResetModel()

@@ -64,8 +64,6 @@ class MultiLLMTransformation(BaseTransformation):
             try:
                 final_system = placeholder_wrapper(system_prompt, row)
                 final_user = placeholder_wrapper(user_prompt, row)
-                print(f"System Prompt: {final_system}")
-                print(f"User Prompt: {final_user}")
                 response = self._call_llm(provider, model_name, final_system, final_user)
                 df.at[idx, output_col_name] = response
             except Exception as e:

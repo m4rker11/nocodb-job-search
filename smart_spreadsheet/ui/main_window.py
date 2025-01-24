@@ -20,6 +20,7 @@ from ui.transform_dialog import TransformDialog
 from services.file_service import load_data, save_data
 from transformations.utils import find_transformations_in_package
 from transformations.manager import TransformationManager
+from ui.transformation_header import TransformationHeader
 
 
 class MainWindow(QMainWindow):
@@ -42,11 +43,14 @@ class MainWindow(QMainWindow):
 
         # Build UI immediately so it’s visible
         self.init_ui()
-
+        self.init_headers()
         # After building UI, load/check user settings
         self.load_user_settings()
         self.check_and_load_last_file() 
-
+        # Initialize default transformations if new file
+        if not self.current_file_path:
+            self.setup_default_transformations()
+        
 
     def init_ui(self):
         """
@@ -98,7 +102,37 @@ class MainWindow(QMainWindow):
                 font-family: monospace;
                 padding: 8px;
             }
+            TransformationHeader::section {
+                background: #f8f9fa;
+                border-right: 1px solid #dee2e6;
+                padding-right: 24px;
+            }
+            TransformationHeader::section:hover {
+                background: #e9ecef;
+            }
         """)
+        self.setStyleSheet("""
+            /* Header Styles */
+            TransformationHeader::section {
+                background: #f8f9fa;
+                border-right: 1px solid #dee2e6;
+                padding-right: 24px;
+            }
+            TransformationHeader::section:hover {
+                background: #e9ecef;
+            }
+
+            /* Status Column */
+            QTableView::item[column="Application_Status"] {
+                font-style: italic;
+                color: #6c757d;
+            }
+
+            /* Action Columns */
+            QTableView::item[transform="true"] {
+                background: #f8f9fa;
+            }
+            """)
         self.splitter.addWidget(self.reading_area)
 
         # Set initial splitter sizes (75% table, 25% reading area)
@@ -132,6 +166,38 @@ class MainWindow(QMainWindow):
         self.df_model.dataChanged.connect(self.auto_save)
 
         self.setCentralWidget(main_widget)
+    def init_headers(self):
+        """Initialize custom header with action buttons"""
+        self.header = TransformationHeader(self.table_view)
+        self.table_view.setHorizontalHeader(self.header)
+        self.header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.header.customContextMenuRequested.connect(self.on_header_context_menu)
+        self.header.action_requested.connect(self.on_header_action)
+        self.update_header_actions()
+
+    def update_header_actions(self):
+        """Set which columns show action buttons based on transformations"""
+        if not hasattr(self, "df_model") or not self.df_model.dataFrame().attrs.get("column_metadata"):
+            return
+
+        action_cols = [
+            i for i, col in enumerate(self.df_model.dataFrame().attrs["column_metadata"])
+            if col["transform"] is not None
+        ]
+        self.header.set_action_columns(action_cols)
+    def on_header_action(self, col):
+        """Handle header button clicks"""
+        action = self.column_actions.get(col)
+        if not action:
+            return
+            
+        selected = self.table_view.selectionModel().selectedRows()
+        if not selected:
+            QMessageBox.warning(self, "No Selection", "Please select rows to process")
+            return
+            
+        for idx in selected:
+            self.process_action(action, idx.row())
     def load_user_settings(self):
         """
         Check essential settings (like email credentials, resume folder) AFTER UI is loaded.
@@ -190,22 +256,40 @@ class MainWindow(QMainWindow):
         if not file_path:
             return
 
-        # Predefined columns
+        # Predefined columns with transformation metadata
         columns = [
-            "CompanyName", "CompanyWebsite", "Job_Title", "Job_Description",
-            "Application_Status", "Hiring_Manager_Name", "Hiring_Manager_LinkedIn",
-            "Hiring_Manager_Email", "LinkedIn_Message", "First_Email", 
-            "Second_Email", "Phone_Number"
+            {"name": "CompanyName", "type": "text", "transform": None},
+            {"name": "CompanyWebsite", "type": "text", "transform": "website_scrape"},
+            {"name": "JobURL", "type": "text", "transform": "job_scrape"},
+            {"name": "WebsiteSummary", "type": "text", "transform": None},
+            {"name": "JobDescription", "type": "text", "transform": None},
+            {"name": "LinkedInURL", "type": "text", "transform": "wiza_enrich"},
+            {"name": "Personal_Email", "type": "text", "transform": None},
+            {"name": "Work_Email", "type": "text", "transform": None},
+            {"name": "LinkedIn_Summary", "type": "text", "transform": None},
+            {"name": "LLM_Analysis", "type": "text", "transform": "jd_analysis"},
+            {"name": "LinkedIn_Intro", "type": "text", "transform": "linkedin_msg"},
+            {"name": "FollowUp_Email_1", "type": "text", "transform": "followup_email"},
+            {"name": "FollowUp_Email_2", "type": "text", "transform": "followup_email"},
+            {"name": "Application_Status", "type": "text", "transform": None}
         ]
-        
-        df = pd.DataFrame(columns=columns)
+
+        # Create DataFrame with metadata
+        df = pd.DataFrame(columns=[col["name"] for col in columns])
+        df.attrs["column_metadata"] = columns  # Store metadata in DataFrame attributes
+
         try:
             save_data(df, file_path)
             self.df_model.setDataFrame(df)
             self.set_current_file_path(file_path)
+            
+            # Initialize transformation manager
+            self.trans_manager = TransformationManager(file_path)
+            self.setup_default_transformations()
+            
         except Exception as e:
-            QMessageBox.critical(self, "Error Creating File", str(e))
-
+            QMessageBox.critical(self, "Error Creating File", str(e))   
+        
     def save_current_file(self):
         if not self.current_file_path:
             return
@@ -285,17 +369,6 @@ class MainWindow(QMainWindow):
         On close, do final backup as CSV, plus save metadata.
         """
         if self.current_file_path:
-            df = self.df_model.dataFrame()
-            base, _ = os.path.splitext(self.current_file_path)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            new_path = f"{base}_{timestamp}.csv"
-            try:
-                df.to_csv(new_path, index=False)
-                print(f"[INFO] Final backup saved to {new_path}")
-            except Exception as e:
-                print(f"[ERROR] Could not save timestamped file: {e}")
-
-            # Also save transformation metadata
             if self.trans_manager:
                 self.trans_manager.save_metadata()
 
@@ -628,3 +701,55 @@ class MainWindow(QMainWindow):
         self.df_model.setDataFrame(new_df)
         QMessageBox.information(self, "Success", "Transformation applied!")
         self.auto_save(force=True)
+    def setup_default_transformations(self):
+        """Configure default transformations for new sheets"""
+        if not self.trans_manager:
+            return
+
+        # Website Scrape
+        self.trans_manager.add_transformation(
+            transform_id="website_scrape",
+            transformation_name="StealthBrowserTransformation",
+            input_cols=["CompanyWebsite"],
+            output_col="WebsiteSummary"
+        )
+
+        # Job Scrape
+        self.trans_manager.add_transformation(
+            transform_id="job_scrape",
+            transformation_name="StealthBrowserTransformation",
+            input_cols=["JobURL"],
+            output_col="JobDescription"
+        )
+
+        # Wiza Enrichment
+        self.trans_manager.add_transformation(
+            transform_id="wiza_enrich",
+            transformation_name="WizaIndividualRevealTransformation",
+            input_cols=["LinkedInURL"],
+            output_col=None  # Uses predefined outputs
+        )
+
+        # Job Description Analysis
+        self.trans_manager.add_transformation(
+            transform_id="jd_analysis",
+            transformation_name="JDAnalysisTransformation",
+            input_cols=["JobDescription"],
+            output_col="LLM_Analysis"
+        )
+
+        # LinkedIn Message
+        self.trans_manager.add_transformation(
+            transform_id="linkedin_msg",
+            transformation_name="LinkedInMessageTransformation",
+            input_cols=["LLM_Analysis"],
+            output_col=None  # Uses predefined outputs
+        )
+
+        # Follow-Up Emails
+        self.trans_manager.add_transformation(
+            transform_id="followup_email",
+            transformation_name="FollowUpEmailTransformation",
+            input_cols=["LLM_Analysis"],
+            output_col=None  # Uses predefined outputs
+        )
