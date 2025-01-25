@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QTableView, QComboBox, QFileDialog, QMessageBox,
     QInputDialog, QMenu, QDialog, QToolBar, QSplitter, QTextEdit,
 )
-from PyQt6.QtGui import QAction
-from PyQt6.QtCore import Qt, QPoint, QModelIndex
+from PyQt6.QtGui import QAction, QColor
+from PyQt6.QtCore import Qt, QPoint, QModelIndex, QTimer
 from ui.compose_email_dialog import ComposeEmailDialog
 from datetime import datetime
 # Services and UI imports
@@ -49,6 +49,7 @@ class MainWindow(QMainWindow):
         # After building UI, load/check user settings
         self.load_user_settings()
         self.check_and_load_last_file()
+        self.processing_rows = set()
         # Initialize default transformations if new file
         if not self.current_file_path:
             self.setup_default_transformations()
@@ -252,13 +253,12 @@ class MainWindow(QMainWindow):
             {"name": "CompanyWebsite", "type": "text", "transform": "website_scrape"},
             {"name": "WebsiteSummary", "type": "text", "transform": None},
             {"name": "JobURL", "type": "text", "transform": "job_scrape"},
-            {"name": "JobDescription", "type": "text", "transform": None},
+            {"name": "Job_Description", "type": "text", "transform": None},
             {"name": "Job_ID", "type": "text", "transform": None},
             {"name": "Job_Title", "type": "text", "transform": None},
             {"name": "Hiring_Manager_Name", "type": "text", "transform": None},
             {"name": "Hiring_Manager_LinkedIn", "type": "text", "transform": "wiza_enrich"},
-            {"name": "Personal_Email", "type": "text", "transform": None},
-            {"name": "Work_Email", "type": "text", "transform": None},
+            {"name": "Email", "type": "text", "transform": None},
             {"name": "LinkedIn_Summary", "type": "text", "transform": None},
             {"name": "LLM_Analysis", "type": "text", "transform": "jd_analysis"},
             {"name": "LinkedIn_Intro", "type": "text", "transform": "linkedin_msg"},
@@ -470,11 +470,10 @@ class MainWindow(QMainWindow):
             return
 
         new_row = df.iloc[row_idx].copy()
-        # Reset job-related fields
-        new_row[['Job Title', 'Job Description', "Application Status",
-                'Hiring Manager Name', 'Hiring Manager LinkedIn',
-                'Hiring Manager Email', 'LinkedIn Message',
-                'First Email', 'Second Email', 'Phone Number']] = ''
+        new_row[['Job_Title', 'Job_Description', 'Application_Status',
+                'Hiring_Manager_Name', 'Hiring_Manager_LinkedIn',
+                'Email', 'LinkedIn_Intro',
+                'FollowUp_Email_1', 'FollowUp_Email_2']] = ''
 
         self.df_model.insertRows(row_idx, 1)
         updated_df = self.df_model.dataFrame()
@@ -487,10 +486,9 @@ class MainWindow(QMainWindow):
             return
 
         new_row = df.iloc[row_idx].copy()
-        # Reset hiring manager fields
-        new_row[['Hiring Manager Name', 'Hiring Manager LinkedIn',
-                'Hiring Manager Email', 'LinkedIn Message',
-                'First Email', 'Second Email', 'Phone Number']] = ''
+        new_row[['Hiring_Manager_Name', 'Hiring_Manager_LinkedIn',
+                'Email', 'LinkedIn_Intro',
+                'FollowUp_Email_1', 'FollowUp_Email_2']] = ''
 
         self.df_model.insertRows(row_idx, 1)
         updated_df = self.df_model.dataFrame()
@@ -720,16 +718,17 @@ class MainWindow(QMainWindow):
             input_cols=["CompanyWebsite"],
             output_col="WebsiteSummary",
             condition_type="is_not_empty",
-            condition_cols="CompanyWebsite"
+            condition_cols=["CompanyWebsite"]  # Changed to list
         )
-
 
         # Job Scrape
         self.trans_manager.add_transformation(
             transform_id="job_scrape",
             transformation_name="Stealth Browser Web Scraper",
             input_cols=["JobURL"],
-            output_col="JobDescription"
+            output_col="Job_Description",
+            condition_type="is_not_empty",  # Add missing condition
+            condition_cols=["JobURL"]  # Added as list
         )
 
         # Wiza Enrichment
@@ -737,7 +736,9 @@ class MainWindow(QMainWindow):
             transform_id="wiza_enrich",
             transformation_name="Wiza Individual Reveal Transformation",
             input_cols=["Hiring_Manager_LinkedIn"],
-            output_col=None  # Uses predefined outputs
+            output_col=None,
+            condition_type="is_not_empty",  # Add condition
+            condition_cols=["Hiring_Manager_LinkedIn"]  # Added as list
         )
 
         # LinkedIn Message
@@ -747,17 +748,17 @@ class MainWindow(QMainWindow):
             input_cols=["LLM_Analysis"],
             output_col="LinkedIn_Intro",
             condition_type="all_not_empty",
-            condition_cols=["Hiring_Manager_Linkedin", "JobDescription"]
+            condition_cols=["Hiring_Manager_LinkedIn", "Job_Description"]  # Fixed column name
         )
 
-        # Follow-Up Emails - Requires timeline fields
+        # Follow-Up Emails
         self.trans_manager.add_transformation(
             transform_id="followup_email",
             transformation_name="Professional Follow-Up Emails",
             input_cols=["LLM_Analysis"],
             output_col=None,
             condition_type="all_not_empty",
-            condition_cols=["email", "JobDescription", "Hiring_Manager_Linkedin"]
+            condition_cols=["Email", "Job_Description", "Hiring_Manager_LinkedIn"]  # Fixed column name
         )
 
     def get_column_roles(self):
@@ -792,22 +793,55 @@ class MainWindow(QMainWindow):
 
 
     def on_run_row_clicked(self, row_idx):
-        """Handle play button click to run transformations on a row."""
-        if not self.trans_manager:
-            print("No transformations registered.")
+        """Queue row for processing and print condition status"""
+        if row_idx in self.processing_rows:
             return
-        # Sort transformations by output column order
-        sorted_transforms = self.get_sorted_transformations()
-        # Clear signatures to force re-run
-        for transform_id in sorted_transforms:
-            meta = self.trans_manager._metadata["transformations"].get(transform_id)
-            if meta and str(row_idx) in meta["row_signatures"]:
-                del meta["row_signatures"][str(row_idx)]
-        # Apply transformations
+            
         df = self.df_model.dataFrame()
-        new_df = self.trans_manager.apply_all_transformations(df, row_idx=row_idx)
-        self.df_model.setDataFrame(new_df)
+        sorted_transforms = self.get_sorted_transformations()
+        
+        # Check conditions for each transformation
+        print(f"\n--- Condition checks for row {row_idx} ---")
+        for transform_id in sorted_transforms:
+            condition_met = self.trans_manager.should_process_transform(df, transform_id, row_idx)
+
+            transform_name = self.trans_manager.get_metadata()["transformations"][transform_id]["transformation_name"]
+            status = "MET" if condition_met else "NOT MET"
+            print(f"{transform_name} ({transform_id}): {status}")
+        
+        self.processing_rows.add(row_idx)
+        self.trans_manager.add_row_to_queue(row_idx, df, sorted_transforms)
+        
+        self._update_row_style(row_idx, "processing")
+    def _connect_worker_signals(self, worker):
+        worker.signals.started.connect(self._handle_transform_start)
+        worker.signals.finished.connect(self._handle_transform_finish)
+        worker.signals.error.connect(self._handle_transform_error)
+
+    def _handle_transform_start(self, row_idx):
+        self._update_row_style(row_idx, "processing")
+
+    def _handle_transform_finish(self, row_idx, new_data):
+        # Update dataframe with new values
+        df = self.df_model.dataFrame()
+        df.iloc[row_idx] = new_data
+        self.df_model.setDataFrame(df)
+        
+        self.processing_rows.discard(row_idx)
+        self._update_row_style(row_idx, "success")
         self.auto_save()
+
+    def _handle_transform_error(self, row_idx, error_msg):
+        self.processing_rows.discard(row_idx)
+        self._update_row_style(row_idx, "error")
+        QMessageBox.warning(self, "Processing Error", 
+                           f"Row {row_idx+1}: {error_msg}")
+
+    def _update_row_style(self, row_idx, state):
+        # Visual feedback using delegate
+        self.table_view.viewport().update(
+            self.table_view.visualRect(self.df_model.index(row_idx, 0))
+        )
 
     def get_sorted_transformations(self):
         """Sort transformations by their output column's position."""

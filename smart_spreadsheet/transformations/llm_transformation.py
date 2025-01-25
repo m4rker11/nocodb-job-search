@@ -50,7 +50,7 @@ class MultiLLMTransformation(BaseTransformation):
             }
         ]
 
-    def transform(self, df, output_col_name, **kwargs):
+    def transform(self, df, output_col_name, *args, **kwargs):
         provider = kwargs.get("provider", "OpenAI").strip().lower()
         model_name = kwargs.get("model", "gpt-4o-mini").strip()
         system_prompt = kwargs.get("system_prompt", "")

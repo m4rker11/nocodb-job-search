@@ -72,8 +72,7 @@ class WizaIndividualRevealTransformation(BaseTransformation):
     description = "Extracts verified emails and professional information from LinkedIn profiles."
     predefined_output = True  # Override the flag
     output_columns = [  # Define fixed columns
-        'Personal Email', 
-        'Work Email',  
+        'Email', 
         'Summary'
     ]
 

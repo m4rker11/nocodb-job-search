@@ -30,7 +30,7 @@ class FollowUpEmailTransformation(MultiLLMTransformation):
             }
         ]
 
-    def transform(self, df, output_col_name, **kwargs):
+    def transform(self, df, output_col_name, *args, **kwargs):
         system_prompt = """You are an executive communications assistant crafting job follow-up emails. Create emails that:
 - Maintain professional yet personable tone
 - Reference specific company/job details
@@ -52,8 +52,7 @@ Structure each email:
 Context:
 - Position: {{Job_Title}} (ID: {{Job_ID}})
 - Applied on: {{Application_Date}}
-- Initial outreach: {{First_Email}}
-- New achievements: {{Recent_Achievements}}
+- Linkedin Connection Message: {{LinkedIn_Intro}}
 
 Email 1 (1-week follow-up):
 - Purpose: Enthusiastic check-in

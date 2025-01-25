@@ -29,7 +29,7 @@ class LinkedInMessageTransformation(MultiLLMTransformation):
             }
         ]
 
-    def transform(self, df, output_col_name, **kwargs):
+    def transform(self, df, output_col_name, *args,**kwargs):
         system_prompt = """You are a career coach crafting LinkedIn connection requests. Messages MUST:
             - Be under 300 characters
             - Start with proper greeting (e.g., "Hi [First Name]")
