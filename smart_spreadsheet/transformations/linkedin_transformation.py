@@ -31,24 +31,24 @@ class LinkedInMessageTransformation(MultiLLMTransformation):
 
     def transform(self, df, output_col_name, **kwargs):
         system_prompt = """You are a career coach crafting LinkedIn connection requests. Messages MUST:
-- Be under 300 characters
-- Start with proper greeting (e.g., "Hi [First Name]")
-- Mention specific job applied for (title/ID)
-- Highlight 1-2 key skills from resume matching job requirements
-- End with clear call to connect
-- NO markdown/placeholders"""
+            - Be under 300 characters
+            - Start with proper greeting (e.g., "Hi [First Name]")
+            - Mention specific job applied for (title/ID)
+            - Highlight 1-2 key skills from resume matching job requirements
+            - End with clear call to connect
+            - NO markdown/placeholders"""
 
         user_prompt = """Create LinkedIn message for {{Hiring_Manager_Name}} at {{CompanyName}}:
-Job Title: {{Job_Title}} (ID: {{Job_ID}})
-Job Requirements: {{Job_Description}}
-My Resume Highlights: {{user_resume}}
-Their Profile: {{LinkedIn_Profile}}
+            Job Title: {{Job_Title}} (ID: {{Job_ID}})
+            Job Requirements: {{Job_Description}}
+            My Resume Highlights: {{user_resume}}
+            Their Profile: {{LinkedIn_Profile}}
 
-Include:
-1. Personalized greeting
-2. Mention of position applied for
-3. Top relevant skill from my resume
-4. Connection request"""
+            Include:
+            1. Personalized greeting
+            2. Mention of position applied for
+            3. Top relevant skill from my resume
+            4. Connection request"""
 
         provider = kwargs.get("provider", "OpenAI").strip().lower()
         model_name = kwargs.get("model", "gpt-4").strip()

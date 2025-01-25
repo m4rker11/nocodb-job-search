@@ -250,10 +250,13 @@ class MainWindow(QMainWindow):
         columns = [
             {"name": "CompanyName", "type": "text", "transform": None},
             {"name": "CompanyWebsite", "type": "text", "transform": "website_scrape"},
-            {"name": "JobURL", "type": "text", "transform": "job_scrape"},
             {"name": "WebsiteSummary", "type": "text", "transform": None},
+            {"name": "JobURL", "type": "text", "transform": "job_scrape"},
             {"name": "JobDescription", "type": "text", "transform": None},
-            {"name": "LinkedInURL", "type": "text", "transform": "wiza_enrich"},
+            {"name": "Job_ID", "type": "text", "transform": None},
+            {"name": "Job_Title", "type": "text", "transform": None},
+            {"name": "Hiring_Manager_Name", "type": "text", "transform": None},
+            {"name": "Hiring_Manager_LinkedIn", "type": "text", "transform": "wiza_enrich"},
             {"name": "Personal_Email", "type": "text", "transform": None},
             {"name": "Work_Email", "type": "text", "transform": None},
             {"name": "LinkedIn_Summary", "type": "text", "transform": None},
@@ -261,7 +264,7 @@ class MainWindow(QMainWindow):
             {"name": "LinkedIn_Intro", "type": "text", "transform": "linkedin_msg"},
             {"name": "FollowUp_Email_1", "type": "text", "transform": "followup_email"},
             {"name": "FollowUp_Email_2", "type": "text", "transform": "followup_email"},
-            {"name": "Application_Status", "type": "text", "transform": None}
+            {"name": "Application_Status", "type": "text", "transform": None},
         ]
 
         # Create DataFrame with metadata
@@ -715,8 +718,11 @@ class MainWindow(QMainWindow):
             transform_id="website_scrape",
             transformation_name="Stealth Browser Web Scraper",
             input_cols=["CompanyWebsite"],
-            output_col="WebsiteSummary"
+            output_col="WebsiteSummary",
+            condition_type="is_not_empty",
+            condition_cols="CompanyWebsite"
         )
+
 
         # Job Scrape
         self.trans_manager.add_transformation(
@@ -730,7 +736,7 @@ class MainWindow(QMainWindow):
         self.trans_manager.add_transformation(
             transform_id="wiza_enrich",
             transformation_name="Wiza Individual Reveal Transformation",
-            input_cols=["LinkedInURL"],
+            input_cols=["Hiring_Manager_LinkedIn"],
             output_col=None  # Uses predefined outputs
         )
 
@@ -739,15 +745,19 @@ class MainWindow(QMainWindow):
             transform_id="linkedin_msg",
             transformation_name="LinkedIn Intro Message",
             input_cols=["LLM_Analysis"],
-            output_col=None  # Uses predefined outputs
+            output_col="LinkedIn_Intro",
+            condition_type="all_not_empty",
+            condition_cols=["Hiring_Manager_Linkedin", "JobDescription"]
         )
 
-        # Follow-Up Emails
+        # Follow-Up Emails - Requires timeline fields
         self.trans_manager.add_transformation(
             transform_id="followup_email",
             transformation_name="Professional Follow-Up Emails",
             input_cols=["LLM_Analysis"],
-            output_col=None  # Uses predefined outputs
+            output_col=None,
+            condition_type="all_not_empty",
+            condition_cols=["email", "JobDescription", "Hiring_Manager_Linkedin"]
         )
 
     def get_column_roles(self):

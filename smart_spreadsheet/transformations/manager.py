@@ -135,36 +135,35 @@ class TransformationManager:
         return df
 
     def _build_condition_series(self, df: pd.DataFrame, meta: dict) -> pd.Series:
-        """
-        Construct a boolean series based on condition_type, condition_col, condition_value.
-        If none is given, default to True for all rows.
-        """
+        """Handle both single and multi-column conditions"""
         ctype = meta.get("condition_type")
-        ccol = meta.get("condition_col")
+        ccols = meta.get("condition_cols") or [meta.get("condition_col")]  # Backward compatible
         cval = meta.get("condition_value")
 
-        # If no condition type or no column, run on all rows
-        if not ctype or not ccol or ccol not in df.columns:
+        # Clean column list
+        ccols = [ccol for ccol in ccols if ccol in df.columns] if ccols else []
+
+        # Default to True if no valid columns
+        if not ctype or not ccols:
             return pd.Series([True]*len(df), index=df.index)
 
-        # Convert column to string type (just to handle None vs empty gracefully)
-        col_series = df[ccol].astype(str)
+        # Convert columns to string series
+        col_series = df[ccols].astype(str)
 
-        # Build condition
         if ctype == "is_empty":
-            # True if cell is "" or "nan" (after astype(str))
-            return (col_series == "") | (col_series.str.lower() == "nan")
-
+            return (col_series == "") | (col_series == "nan").any(axis=1)
+            
         elif ctype == "is_not_empty":
-            # Opposite of is_empty
-            return ~((col_series == "") | (col_series.str.lower() == "nan"))
-
+            return ((col_series != "") & (col_series != "nan")).any(axis=1)
+            
+        elif ctype == "all_not_empty":
+            return ((col_series != "") & (col_series != "nan")).all(axis=1)
+            
         elif ctype == "equals" and cval is not None:
-            return col_series == str(cval)
-
-        elif ctype == "not_equals" and cval is not None:
-            return col_series != str(cval)
-
+            return (col_series == str(cval)).any(axis=1)
+            
+        elif ctype == "all_equals" and cval is not None:
+            return (col_series == str(cval)).all(axis=1)
+            
         else:
-            # If something is missing or invalid, default to all True
             return pd.Series([True]*len(df), index=df.index)
