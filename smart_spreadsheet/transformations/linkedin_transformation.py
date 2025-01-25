@@ -65,9 +65,9 @@ Include:
                 response = self._generate_with_retries(
                     provider, model_name, final_system, final_user
                 )
-                df.at[idx, "LinkedIn_Intro"] = response
+                df.at[idx, output_col_name] = response
             except Exception as e:
-                df.at[idx, "LinkedIn_Intro"] = f"ERROR: {e}"
+                df.at[idx, output_col_name] = f"ERROR: {e}"
 
         return df
 
@@ -76,15 +76,13 @@ Include:
         original_response = response
         
         for attempt in range(max_attempts):
-            if len(response) <= 300 and self._contains_required_elements(response):
+            if len(response) <= 300:
                 return response
             
             # Build shortening prompt
             error_msg = []
             if len(response) > 300:
                 error_msg.append(f"Current length: {len(response)} characters")
-            if not self._contains_required_elements(response):
-                error_msg.append("Missing required elements")
                 
             shorten_prompt = (
                 f"Revise this message to be under 300 characters while keeping all required elements:\n"

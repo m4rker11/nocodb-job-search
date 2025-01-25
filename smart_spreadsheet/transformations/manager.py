@@ -67,36 +67,30 @@ class TransformationManager:
         joined = "|".join(row_data)
         return hashlib.md5(joined.encode("utf-8")).hexdigest()
 
-    def apply_all_transformations(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Go through each transformation in metadata. For each row, evaluate condition,
-        check signature, and (re)run if needed.
-        """
+    def apply_all_transformations(self, df: pd.DataFrame, row_idx: int = None) -> pd.DataFrame:
+        """Apply transformations optionally limited to a specific row."""
         for transform_id, meta in self._metadata["transformations"].items():
             transformation = self.transformations_dict.get(meta["transformation_name"])
             if not transformation:
-                # Could raise an error or skip
                 continue
-
-            # Condition logic
             condition_series = self._build_condition_series(df, meta)
 
-            for row_idx in range(len(df)):
-                # Check condition for that row
+            # Determine rows to process
+            if row_idx is not None:
+                if row_idx < 0 or row_idx >= len(df):
+                    continue
                 if not condition_series.iloc[row_idx]:
-                    continue  # skip if condition is false
-
-                # Compute row signature
+                    continue
+                rows_to_process = [row_idx]
+            else:
+                rows_to_process = [i for i, cond in enumerate(condition_series) if cond]
+            for r_idx in rows_to_process:
                 input_cols = meta["input_cols"]
-                new_sig = self.compute_row_signature(df, row_idx, input_cols)
-                old_sig = meta["row_signatures"].get(str(row_idx), None)
-
-                # Only run if signature changed
+                new_sig = self.compute_row_signature(df, r_idx, input_cols)
+                old_sig = meta["row_signatures"].get(str(r_idx), None)
                 if new_sig != old_sig:
-                    # Run transformation for that row
-                    df = self.run_transformation_row(df, transform_id, row_idx)
-                    # Update signature
-                    meta["row_signatures"][str(row_idx)] = new_sig
+                    df = self.run_transformation_row(df, transform_id, r_idx)
+                    meta["row_signatures"][str(r_idx)] = new_sig
 
         return df
 

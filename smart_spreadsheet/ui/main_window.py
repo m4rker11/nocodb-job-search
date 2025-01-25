@@ -16,6 +16,7 @@ from services.settings_service import get_email_account, get_resume_text
 from ui.settings_dialog import SettingsDialog
 from ui.data_frame_model import DataFrameModel
 from ui.column_row_delegate import ColumnRoleDelegate
+from ui.run_row_delegate import RunRowDelegate
 from ui.compose_email_dialog import ComposeEmailDialog
 from ui.transform_dialog import TransformDialog
 from services.file_service import load_data, save_data
@@ -64,6 +65,10 @@ class MainWindow(QMainWindow):
         settings_action = QAction("Preferences", self)
         settings_action.triggered.connect(self.open_settings_dialog)
         toolbar.addAction(settings_action)
+        self.add_row_action = QAction("Add Row", self)
+        self.add_row_action.triggered.connect(self.add_new_row)
+        toolbar.addAction(self.add_row_action)
+        self.add_row_action.setVisible(False)  # Start hidd
 
         # ========== CENTRAL WIDGET & LAYOUT ==========
         main_widget = QWidget()
@@ -147,7 +152,9 @@ class MainWindow(QMainWindow):
         # Auto-save on data change
         self.df_model.dataChanged.connect(self.auto_save)
         self.df_model.dataChanged.connect(lambda: self.table_view.viewport().update())
-
+        self.run_row_delegate = RunRowDelegate(self.table_view)
+        self.table_view.setItemDelegateForColumn(0, self.run_row_delegate)
+        self.run_row_delegate.clicked.connect(self.on_run_row_clicked)
         self.setCentralWidget(main_widget)
     
     def init_headers(self):
@@ -319,10 +326,13 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error saving last file path: {e}")
         # Update button text
-        if self.current_file_path:
+        # Update lastfile.txt and UI elements
+        if path:
             self.create_save_button.setText("Save File")
+            self.add_row_action.setVisible(True)  # Show when file exists
         else:
             self.create_save_button.setText("Create New")
+            self.add_row_action.setVisible(False)  # Hide when no file
 
     # ------------------------------------------------------
     # AUTO-SAVE
@@ -703,7 +713,7 @@ class MainWindow(QMainWindow):
         # Website Scrape
         self.trans_manager.add_transformation(
             transform_id="website_scrape",
-            transformation_name="StealthBrowserTransformation",
+            transformation_name="Stealth Browser Web Scraper",
             input_cols=["CompanyWebsite"],
             output_col="WebsiteSummary"
         )
@@ -711,7 +721,7 @@ class MainWindow(QMainWindow):
         # Job Scrape
         self.trans_manager.add_transformation(
             transform_id="job_scrape",
-            transformation_name="StealthBrowserTransformation",
+            transformation_name="Stealth Browser Web Scraper",
             input_cols=["JobURL"],
             output_col="JobDescription"
         )
@@ -719,23 +729,15 @@ class MainWindow(QMainWindow):
         # Wiza Enrichment
         self.trans_manager.add_transformation(
             transform_id="wiza_enrich",
-            transformation_name="WizaIndividualRevealTransformation",
+            transformation_name="Wiza Individual Reveal Transformation",
             input_cols=["LinkedInURL"],
             output_col=None  # Uses predefined outputs
-        )
-
-        # Job Description Analysis
-        self.trans_manager.add_transformation(
-            transform_id="jd_analysis",
-            transformation_name="JDAnalysisTransformation",
-            input_cols=["JobDescription"],
-            output_col="LLM_Analysis"
         )
 
         # LinkedIn Message
         self.trans_manager.add_transformation(
             transform_id="linkedin_msg",
-            transformation_name="LinkedInMessageTransformation",
+            transformation_name="LinkedIn Intro Message",
             input_cols=["LLM_Analysis"],
             output_col=None  # Uses predefined outputs
         )
@@ -743,7 +745,7 @@ class MainWindow(QMainWindow):
         # Follow-Up Emails
         self.trans_manager.add_transformation(
             transform_id="followup_email",
-            transformation_name="FollowUpEmailTransformation",
+            transformation_name="Professional Follow-Up Emails",
             input_cols=["LLM_Analysis"],
             output_col=None  # Uses predefined outputs
         )
@@ -777,3 +779,38 @@ class MainWindow(QMainWindow):
             if col_name == t_meta.get("output_col"):
                 return 'output'
         return None
+
+
+    def on_run_row_clicked(self, row_idx):
+        """Handle play button click to run transformations on a row."""
+        if not self.trans_manager:
+            print("No transformations registered.")
+            return
+        # Sort transformations by output column order
+        sorted_transforms = self.get_sorted_transformations()
+        # Clear signatures to force re-run
+        for transform_id in sorted_transforms:
+            meta = self.trans_manager._metadata["transformations"].get(transform_id)
+            if meta and str(row_idx) in meta["row_signatures"]:
+                del meta["row_signatures"][str(row_idx)]
+        # Apply transformations
+        df = self.df_model.dataFrame()
+        new_df = self.trans_manager.apply_all_transformations(df, row_idx=row_idx)
+        self.df_model.setDataFrame(new_df)
+        self.auto_save()
+
+    def get_sorted_transformations(self):
+        """Sort transformations by their output column's position."""
+        df = self.df_model.dataFrame()
+        transformations = []
+        for transform_id, meta in self.trans_manager.get_metadata()["transformations"].items():
+            output_col = meta.get("output_col")
+            if output_col and output_col in df.columns:
+                col_index = df.columns.get_loc(output_col)
+                transformations.append((col_index, transform_id))
+            else:
+                # Place transformations without output_col at the end
+                transformations.append((len(df.columns), transform_id))
+        # Sort by column index
+        transformations.sort(key=lambda x: x[0])
+        return [tid for _, tid in transformations]

@@ -15,6 +15,8 @@ class DataFrameModel(QAbstractTableModel):
 
     def setDataFrame(self, df: pd.DataFrame):
         """Replace the current DataFrame."""
+        if '__Run_Row__' not in df.columns:
+            df.insert(0, '__Run_Row__', '')
         self.beginResetModel()
         self._df = df.copy()
         self.endResetModel()
