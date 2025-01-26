@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QTableView, QComboBox, QFileDialog, QMessageBox,
     QInputDialog, QMenu, QDialog, QToolBar, QSplitter, QTextEdit,
 )
+import re
 from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtCore import Qt, QPoint, QModelIndex, QTimer
 from ui.compose_email_dialog import ComposeEmailDialog
@@ -23,6 +24,7 @@ from services.file_service import load_data, save_data
 from transformations.utils import find_transformations_in_package
 from transformations.manager import TransformationManager
 from ui.transformation_header import TransformationHeader
+from services.email_service import extract_email_address, load_incoming_emails_last_24h
 
 
 class MainWindow(QMainWindow):
@@ -53,7 +55,8 @@ class MainWindow(QMainWindow):
         # Initialize default transformations if new file
         if not self.current_file_path:
             self.setup_default_transformations()
-
+        
+        QTimer.singleShot(0, self.check_email_responses)
 
     def init_ui(self):
         """
@@ -247,42 +250,60 @@ class MainWindow(QMainWindow):
         if not file_path:
             return
 
-        # Predefined columns with transformation metadata
+        # Define column structure with metadata
         columns = [
             {"name": "CompanyName", "type": "text", "transform": None},
             {"name": "CompanyWebsite", "type": "text", "transform": "website_scrape"},
             {"name": "WebsiteSummary", "type": "text", "transform": None},
             {"name": "JobURL", "type": "text", "transform": "job_scrape"},
             {"name": "Job_Description", "type": "text", "transform": None},
-            {"name": "Job_ID", "type": "text", "transform": None},
+            {"name": "Hiring_Manager_LinkedIn", "type": "text", "transform": "wiza_enrich"},
+            {"name": "Application_Status", "type": "text", "transform": None},
             {"name": "Job_Title", "type": "text", "transform": None},
             {"name": "Hiring_Manager_Name", "type": "text", "transform": None},
-            {"name": "Hiring_Manager_LinkedIn", "type": "text", "transform": "wiza_enrich"},
             {"name": "Email", "type": "text", "transform": None},
             {"name": "LinkedIn_Summary", "type": "text", "transform": None},
-            {"name": "LLM_Analysis", "type": "text", "transform": "jd_analysis"},
+            {"name": "Job_Description_Response", "type": "text", "transform": "jd_analysis"},
             {"name": "LinkedIn_Intro", "type": "text", "transform": "linkedin_msg"},
             {"name": "FollowUp_Email_1", "type": "text", "transform": "followup_email"},
             {"name": "FollowUp_Email_2", "type": "text", "transform": "followup_email"},
-            {"name": "Application_Status", "type": "text", "transform": None},
+            
+            {"name": "Job_ID", "type": "text", "transform": None},
         ]
 
-        # Create DataFrame with metadata
-        df = pd.DataFrame(columns=[col["name"] for col in columns])
-        df.attrs["column_metadata"] = columns  # Store metadata in DataFrame attributes
-
         try:
+            # Create DataFrame with 5 empty rows
+            data = {col["name"]: [""] * 5 for col in columns}
+            df = pd.DataFrame(data)
+
+            # Save data file
             save_data(df, file_path)
+
+            
+            # Initialize application state
             self.df_model.setDataFrame(df)
             self.set_current_file_path(file_path)
             
-            # Initialize transformation manager
+            # Initialize transformation manager with empty transformations
             self.trans_manager = TransformationManager(file_path)
+            # Set default transformations
             self.setup_default_transformations()
             
+            # Force save initial transformations
+            self.trans_manager.save_metadata()
+            
+            QMessageBox.information(
+                self, 
+                "File Created",
+                f"Successfully created new file with 5 empty rows:\n{file_path}"
+            )
+            
         except Exception as e:
-            QMessageBox.critical(self, "Error Creating File", str(e))   
-        
+            QMessageBox.critical(
+                self,
+                "Creation Error",
+                f"Could not create file:\n{str(e)}"
+            )
     def save_current_file(self):
         if not self.current_file_path:
             return
@@ -433,9 +454,8 @@ class MainWindow(QMainWindow):
         # If user is right-clicking on a "subject" column,
         # let's offer "Send Email..."
         send_email_action = None
-        if "subject" in col_name.lower():
-            send_email_action = menu.addAction("Send Email...")
-
+        if col_name in ["FollowUp_Email_1", "FollowUp_Email_2"]:
+            send_email_action = menu.addAction(f"Send {col_name.capitalize()}...")
         # Force Re-Run if this column is known as an output_col in metadata
         force_rerun_action = None
         if self.trans_manager and col_name:
@@ -457,7 +477,7 @@ class MainWindow(QMainWindow):
         elif action == add_hiring_action:
             self.duplicate_row_for_new_hiring_manager(row_idx)
         elif action == send_email_action:
-            self.open_compose_dialog_for_row(row_idx)
+            self.open_compose_dialog_for_email(row_idx, col_name)
         elif force_rerun_action and action == force_rerun_action:
             self.force_rerun_for_row(col_name, row_idx)
         elif action == add_row_action:
@@ -503,10 +523,10 @@ class MainWindow(QMainWindow):
         self.current_edit_index = index
         df = self.df_model.dataFrame()
         cell_value = str(df.iloc[index.row(), index.column()])
-        col_name = df.columns[index.column()].lower()
+        col_name = df.columns[index.column()]
 
-        if any(key in col_name for key in ["subject", "body", "email"]):
-            self.open_compose_dialog_for_row(index.row())
+        if col_name in ["FollowUp_Email_1", "FollowUp_Email_2"]:
+            self.open_compose_dialog_for_email(index.row(), col_name)
         else:
             # Block signals to prevent immediate update
             self.reading_area.blockSignals(True)
@@ -522,39 +542,20 @@ class MainWindow(QMainWindow):
                 new_text, 
                 Qt.ItemDataRole.EditRole
             )
-    def open_compose_dialog_for_row(self, row_idx: int):
-        """
-        Use the row's data to populate the ComposeEmailDialog.
-        """
+    def open_compose_dialog_for_email(self, row_idx: int, col_name: str):
         df = self.df_model.dataFrame()
-        if row_idx < 0 or row_idx >= len(df):
-            return
-
-        subject_col = None
-        body_col = None
-        to_col = None
-
-        for col in df.columns:
-            if "subject" in col.lower():
-                subject_col = col
-            if "body" in col.lower():
-                body_col = col
-            if "email" in col.lower():
-                to_col = col
-
-        subject_val = str(df.at[row_idx, subject_col]) if subject_col else ""
-        body_val = str(df.at[row_idx, body_col]) if body_col else ""
-        to_val = str(df.at[row_idx, to_col]) if to_col else ""
-
+        email_json = df.at[row_idx, col_name]
+        to_email = df.at[row_idx, "Email"] if "Email" in df.columns else ""
+        
         dlg = ComposeEmailDialog(
-            to_email=to_val,
-            subject=subject_val,
-            body=body_val,
+            to_email=to_email,
+            email_json=email_json,
             parent=self
         )
+        
         if dlg.exec() == QDialog.accepted:
-            # Optionally mark the row as 'sent'
-            df.at[row_idx, "SentAt"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Update sent status
+            df.at[row_idx, f"{col_name}_sent"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.df_model.setDataFrame(df)
             self.auto_save(force=True)
 
@@ -736,16 +737,16 @@ class MainWindow(QMainWindow):
             transform_id="wiza_enrich",
             transformation_name="Wiza Individual Reveal Transformation",
             input_cols=["Hiring_Manager_LinkedIn"],
-            output_col=None,
-            condition_type="is_not_empty",  # Add condition
-            condition_cols=["Hiring_Manager_LinkedIn"]  # Added as list
+            output_col="Email",  # Now properly sets Email column
+            condition_type="is_not_empty",
+            condition_cols=["Hiring_Manager_LinkedIn"]
         )
 
         # LinkedIn Message
         self.trans_manager.add_transformation(
             transform_id="linkedin_msg",
             transformation_name="LinkedIn Intro Message",
-            input_cols=["LLM_Analysis"],
+            input_cols=["Job_Description"],
             output_col="LinkedIn_Intro",
             condition_type="all_not_empty",
             condition_cols=["Hiring_Manager_LinkedIn", "Job_Description"]  # Fixed column name
@@ -755,12 +756,11 @@ class MainWindow(QMainWindow):
         self.trans_manager.add_transformation(
             transform_id="followup_email",
             transformation_name="Professional Follow-Up Emails",
-            input_cols=["LLM_Analysis"],
-            output_col=None,
+            input_cols=["Job_Description"],
+            output_col= "FollowUp_Email_1", 
             condition_type="all_not_empty",
-            condition_cols=["Email", "Job_Description", "Hiring_Manager_LinkedIn"]  # Fixed column name
+            condition_cols=["Email", "Job_Description", "Hiring_Manager_LinkedIn"]
         )
-
     def get_column_roles(self):
         """Return a dict mapping column names to 'input' or 'output'."""
         column_roles = {}
@@ -776,21 +776,20 @@ class MainWindow(QMainWindow):
         return column_roles
 
     def get_column_role(self, column_index: int) -> str | None:
-        """Check if a column is input/output for transformations"""
+        """Check if column is input/output considering multi-output transforms"""
         if not self.trans_manager or column_index < 0:
             return None
 
         df = self.df_model.dataFrame()
         col_name = df.columns[column_index]
-
-        # Check all transformations for input/output
+        
+        # Check both single and multi-output transformations
         for t_meta in self.trans_manager.get_metadata()["transformations"].values():
             if col_name in t_meta.get("input_cols", []):
                 return 'input'
             if col_name == t_meta.get("output_col"):
                 return 'output'
         return None
-
 
     def on_run_row_clicked(self, row_idx):
         """Queue row for processing and print condition status"""
@@ -810,8 +809,8 @@ class MainWindow(QMainWindow):
             print(f"{transform_name} ({transform_id}): {status}")
         
         self.processing_rows.add(row_idx)
-        self.trans_manager.add_row_to_queue(row_idx, df, sorted_transforms)
-        
+        worker = self.trans_manager.add_row_to_queue(row_idx, df, sorted_transforms)
+        self._connect_worker_signals(worker) 
         self._update_row_style(row_idx, "processing")
     def _connect_worker_signals(self, worker):
         worker.signals.started.connect(self._handle_transform_start)
@@ -822,14 +821,35 @@ class MainWindow(QMainWindow):
         self._update_row_style(row_idx, "processing")
 
     def _handle_transform_finish(self, row_idx, new_data):
-        # Update dataframe with new values
-        df = self.df_model.dataFrame()
-        df.iloc[row_idx] = new_data
-        self.df_model.setDataFrame(df)
-        
-        self.processing_rows.discard(row_idx)
-        self._update_row_style(row_idx, "success")
-        self.auto_save()
+        """Update the DataFrame after transformations, handling new columns."""
+        try:
+            df = self.df_model.dataFrame().copy()
+
+            # Check for new columns added during transformation
+            new_columns = new_data.index.difference(df.columns)
+            print(new_columns)
+            if not new_columns.empty:
+                # Add missing columns to the DataFrame
+                for col in new_columns:
+                    df[col] = pd.NA  # Initialize with NaN/empty
+                self.df_model.setDataFrame(df)  # Update model structure first
+
+            # Align the new_data Series with current DataFrame columns
+            aligned_data = new_data.reindex(df.columns, fill_value=pd.NA)
+            
+            # Update the specific row
+            df.iloc[row_idx] = aligned_data
+            self.df_model.setDataFrame(df)  # Update model with new data
+
+            self.processing_rows.discard(row_idx)
+            self._update_row_style(row_idx, "success")
+            self.statusBar().showMessage(f"Row {row_idx+1} processed successfully", 3000)
+            self.auto_save()
+            print(f"Row {row_idx+1} transformation complete.")
+        except Exception as e:
+            print(f"Error updating row {row_idx}: {str(e)}")
+            self.processing_rows.discard(row_idx)
+            self._update_row_style(row_idx, "error")
 
     def _handle_transform_error(self, row_idx, error_msg):
         self.processing_rows.discard(row_idx)
@@ -858,3 +878,71 @@ class MainWindow(QMainWindow):
         # Sort by column index
         transformations.sort(key=lambda x: x[0])
         return [tid for _, tid in transformations]
+    
+
+    def check_email_responses(self):
+        """Check for email responses in the last 24 hours and show matches."""
+        if not self.current_file_path:
+            return
+
+        df = self.df_model.dataFrame()
+        if df.empty:
+            return
+
+        # Get unique emails and company names
+        emails = df['Email'].dropna().unique().tolist()
+        if len(emails)==0:
+            return 
+        company_names = df['CompanyName'].dropna().unique().tolist()
+
+        # Fetch recent emails
+        recent_emails = load_incoming_emails_last_24h()
+
+        matched_indices = set()
+
+        # Check each recent email for matches
+        for email_info in recent_emails:
+            # Extract sender's email
+            sender_email = extract_email_address(email_info['from'])
+
+            # Check if sender is in the Email column
+            email_matches = df.index[df['Email'].str.lower() == sender_email.lower()].tolist()
+            matched_indices.update(email_matches)
+
+            # Check if company name is in email content
+            email_content = f"{email_info['subject']} {email_info['body']}"
+            for company in company_names:
+                if pd.isna(company):
+                    continue
+                pattern = re.compile(re.escape(str(company)), re.IGNORECASE)
+                if pattern.search(email_content):
+                    company_matches = df.index[
+                        df['CompanyName'].str.lower() == str(company).lower()
+                    ].tolist()
+                    matched_indices.update(company_matches)
+
+        if matched_indices:
+            matched_df = df.iloc[list(matched_indices)]
+            self.show_response_matches(matched_df)
+
+    def show_response_matches(self, matched_df):
+        """Display matching responses in a dialog"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("New Responses Found")
+        dialog.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        # Table view to display matches
+        table = QTableView()
+        model = DataFrameModel(matched_df[['CompanyName', 'Job_Title', 'Hiring_Manager_Name']])
+        table.setModel(model)
+        table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(table)
+
+        # Close button
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(dialog.accept)
+        layout.addWidget(btn_close)
+
+        dialog.exec()

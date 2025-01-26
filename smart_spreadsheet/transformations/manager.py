@@ -159,6 +159,7 @@ class TransformationManager:
         worker = TransformationWorker(row_idx, df, self, sorted_transforms)
         self.queue.put(worker)
         self._start_workers()
+        return worker
 
     def _start_workers(self):
         """Start workers if there's capacity"""

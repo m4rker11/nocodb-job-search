@@ -42,7 +42,7 @@ class LinkedInMessageTransformation(MultiLLMTransformation):
             Job Title: {{Job_Title}} (ID: {{Job_ID}})
             Job Requirements: {{Job_Description}}
             My Resume Highlights: {{user_resume}}
-            Their Profile: {{LinkedIn_Profile}}
+            Their Profile: {{Hiring_Manager_LinkedIn}}
 
             Include:
             1. Personalized greeting

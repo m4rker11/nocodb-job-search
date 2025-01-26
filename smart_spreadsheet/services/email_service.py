@@ -186,67 +186,70 @@ class EmailService:
             print(f"Gmail API error: {str(e)}")
             return []
 
-def load_incoming_emails_last_24h(
-    imap_server: str = GMAIL_IMAP_SERVER,
-    imap_port: int = GMAIL_IMAP_PORT
-) -> List[Dict]:
-    """
-    Fetch all emails received in the last 24 hours using Gmail's IMAP server.
-    Args:
-        imap_server (str): IMAP server address (default: Gmail).
-        imap_port (int): IMAP port (default: 993).
-    Returns:
-        List[Dict]: List of emails with 'from', 'subject', and 'body' keys.
-    """
-    emails = []
-    sender_email = get_email_account()
-    sender_password = get_email_password()
-
-    if not sender_email or not sender_password:
-        return []
-
+def load_incoming_emails_last_24h() -> List[Dict]:
+    """Fetch emails using OAuth2 IMAP authentication"""
     try:
-        # Connect to Gmail IMAP server
-        mail = imaplib.IMAP4_SSL(imap_server, imap_port)
-        mail.login(sender_email, sender_password)
+        # Get OAuth credentials
+        email_service = EmailService()
+        creds = email_service._get_oauth_credentials()
+        
+        # Force token refresh if needed
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            
+        # Get user email from settings
+        user_email = get_email_account()
+        
+        if not user_email or not creds or not creds.valid:
+            raise Exception("Invalid email credentials configuration")
+
+        # IMAP OAuth2 authentication
+        mail = imaplib.IMAP4_SSL(GMAIL_IMAP_SERVER, GMAIL_IMAP_PORT)
+        auth_string = f'user={user_email}\x01auth=Bearer {creds.token}\x01\x01'
+        mail.authenticate('XOAUTH2', lambda x: auth_string.encode())
         mail.select('inbox')
 
-        # Calculate date range for last 24 hours
+        # Calculate date range
         date_since = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
         _, search_data = mail.search(None, f'(SINCE "{date_since}")')
 
+        emails = []
+        
         # Process emails
         for num in search_data[0].split():
-            _, data = mail.fetch(num, '(RFC822)')
-            raw_email = data[0][1]
-            msg = email.message_from_bytes(raw_email)
+            try:
+                _, data = mail.fetch(num, '(RFC822)')
+                raw_email = data[0][1]
+                msg = email.message_from_bytes(raw_email)
 
-            # Extract email details
-            email_details = {
-                'from': msg['from'],
-                'subject': msg['subject'],
-                'body': ''
-            }
+                email_details = {
+                    'from': msg['from'],
+                    'subject': msg['subject'],
+                    'body': ''
+                }
 
-            # Extract body content
-            for part in msg.walk():
-                if part.get_content_type() == 'text/plain':
-                    email_details['body'] += part.get_payload(decode=True).decode()
-                    break  # Prioritize first text/plain part
+                # Extract body content
+                for part in msg.walk():
+                    if part.get_content_type() == 'text/plain':
+                        email_details['body'] += part.get_payload(decode=True).decode(errors='replace')
+                        break  # Prioritize first text/plain part
 
-            emails.append(email_details)
+                emails.append(email_details)
+            except Exception as e:
+                print(f"Error processing email: {str(e)}")
+                continue
 
         mail.close()
         mail.logout()
         return emails
 
     except imaplib.IMAP4.error as e:
-        print(f"IMAP error: {str(e)}")
+        print(f"IMAP protocol error: {str(e)}")
         return []
     except Exception as e:
-        print(f"Error fetching emails: {str(e)}")
+        print(f"Email fetch error: {str(e)}")
         return []
-
+    
 def check_emails_for_sender_or_company(
     emails: List[Dict],
     target_sender: str = None,
@@ -285,3 +288,10 @@ def check_emails_for_sender_or_company(
                     break  # Avoid duplicate matches
 
     return matches
+
+def extract_email_address(s: str) -> str:
+    """Extract email address from a string containing potential formatting"""
+    if not s:
+        return ""
+    match = re.search(r'[\w\.-]+@[\w\.-]+', s)
+    return match.group(0).lower() if match else s.strip().lower()

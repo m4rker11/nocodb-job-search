@@ -106,9 +106,9 @@ class WizaIndividualRevealTransformation(BaseTransformation):
                 summary = self._build_summary(data)
 
                 # Update row with extracted data
-                row['Personal Email'] = personal_email
-                row['Work Email'] = work_email
+                row['Email'] = work_email if work_email else personal_email
                 row['Summary'] = summary
+                row["Hiring_Manager_Name"] = data.get("Name", row["Hiring_Manager_Name"])
 
             except Exception as e:
                 logger.error(f"[Wiza] Error processing row: {e}")
