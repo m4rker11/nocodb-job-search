@@ -476,7 +476,7 @@ class MainWindow(QMainWindow):
             self.duplicate_row_for_new_job(row_idx)
         elif action == add_hiring_action:
             self.duplicate_row_for_new_hiring_manager(row_idx)
-        elif action == send_email_action:
+        elif send_email_action is not None and action == send_email_action:
             self.open_compose_dialog_for_email(row_idx, col_name)
         elif force_rerun_action and action == force_rerun_action:
             self.force_rerun_for_row(col_name, row_idx)
