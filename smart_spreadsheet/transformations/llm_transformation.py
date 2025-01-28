@@ -50,39 +50,48 @@ class MultiLLMTransformation(BaseTransformation):
             }
         ]
 
-    def transform(self, df, output_col_name, *args, **kwargs):
+    def transform(
+        self,
+        df,
+        output_col_name,
+        system_prompt,
+        user_prompt,
+        extra_placeholders=None,
+        json_mode=False,
+        *args,
+        **kwargs
+    ):
         provider = kwargs.get("provider", "OpenAI").strip().lower()
         model_name = kwargs.get("model", "gpt-4o-mini").strip()
-        system_prompt = kwargs.get("system_prompt", "")
-        user_prompt = kwargs.get("user_prompt", "")
-
+        if extra_placeholders is None:
+            extra_placeholders = {}
         # Initialize clients
-        self._init_clients(kwargs.get("api_key"))
-        placeholder_wrapper = self.get_placeholder_wrapper()
+        self._init_clients()
+        placeholder_wrapper = self.get_placeholder_wrapper(extra_placeholders)
         # Process prompts for each row
         for idx, row in df.iterrows():
             try:
                 final_system = placeholder_wrapper(system_prompt, row)
                 final_user = placeholder_wrapper(user_prompt, row)
-                response = self._call_llm(provider, model_name, final_system, final_user)
+                response = self._call_llm(provider, model_name, final_system, final_user, json_mode)
                 df.at[idx, output_col_name] = response
             except Exception as e:
                 df.at[idx, output_col_name] = f"ERROR: {e}"
 
         return df
 
-    def _init_clients(self, api_key):
+    def _init_clients(self):
         self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
         self.anthropic_client = anthropic.Anthropic(
             api_key=os.getenv("ANTHROPIC_API_KEY", "")
         )
 
-    def _call_llm(self, provider, model_name, system_prompt, user_prompt, max_retries=3):
+    def _call_llm(self, provider, model_name, system_prompt, user_prompt, json_mode=False, max_retries=3):
         delay = 2
         for attempt in range(max_retries):
             try:
                 if provider == "openai":
-                    return self._call_openai(model_name, system_prompt, user_prompt)
+                    return self._call_openai(model_name, system_prompt, user_prompt, json_mode)
                 elif provider == "anthropic":
                     return self._call_anthropic(model_name, system_prompt, user_prompt)
                 elif provider == "ollama":
@@ -96,7 +105,7 @@ class MultiLLMTransformation(BaseTransformation):
                 else:
                     raise e
 
-    def _call_openai(self, model_name, system_prompt, user_prompt):
+    def _call_openai(self, model_name, system_prompt, user_prompt, json_mode=False):
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -105,6 +114,7 @@ class MultiLLMTransformation(BaseTransformation):
             model=model_name,
             messages=messages,
             temperature=0.7,
+            response_format={"type": "json_object"} if json_mode else None
         )
         return completion.choices[0].message.content.strip()
 

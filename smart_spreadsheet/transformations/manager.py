@@ -35,6 +35,7 @@ class TransformationWorker(QRunnable):
                     self.df = self.trans_manager.apply_single_transformation(
                         self.df, transform_id, self.row_idx
                     )
+                    print(f"Updated row {self.row_idx} with {transform_id}, the row is now: {self.df.iloc[self.row_idx]}")
                 except Exception as e:
                     print(f"Error in {transform_id}: {str(e)}")
             
@@ -112,18 +113,15 @@ class TransformationManager:
         return hashlib.md5(joined.encode("utf-8")).hexdigest()
 
     def apply_all_transformations(self, df: pd.DataFrame, row_idx: int = None) -> pd.DataFrame:
-        """Apply transformations optionally limited to a specific row."""
         for transform_id, meta in self._metadata["transformations"].items():
             transformation = self.transformations_dict.get(meta["transformation_name"])
             if not transformation:
                 continue
-                
+                    
             condition_series = self._build_condition_series(df, meta)
 
-            # Determine rows to process
             if row_idx is not None:
-                if row_idx < 0 or row_idx >= len(df):
-                    continue
+                # single row
                 if not condition_series.iloc[row_idx]:
                     continue
                 rows_to_process = [row_idx]
@@ -133,23 +131,62 @@ class TransformationManager:
             for r_idx in rows_to_process:
                 input_cols = meta["input_cols"]
                 new_sig = self.compute_row_signature(df, r_idx, input_cols)
-                old_sig = meta["row_signatures"].get(str(r_idx), None)
-                if new_sig != old_sig:
-                    df = self.run_transformation_row(df, transform_id, r_idx)
-                    meta["row_signatures"][str(r_idx)] = new_sig
+
+                # 1) retrieve old data if any
+                old_data = meta["row_signatures"].get(str(r_idx), None)
+                if old_data is not None:
+                    old_sig = old_data.get("signature", "")
+                    completed = old_data.get("completed", False)
+                else:
+                    old_sig = ""
+                    completed = False
+
+                # 2) skip re-run if completed and signature is unchanged
+                if completed and (new_sig == old_sig):
+                    continue  # do not re-run this transformation for this row
+
+                # 3) otherwise run
+                df = self.run_transformation_row(df, transform_id, r_idx)
+                # 4) update row_signatures with new signature and mark completed
+                meta["row_signatures"][str(r_idx)] = {
+                    "signature": new_sig,
+                    "completed": True
+                }
 
         return df
 
     def apply_single_transformation(self, df, transform_id, row_idx):
-        """Thread-safe application of single transformation"""
         self.lock.lock()
         try:
             meta = self._metadata["transformations"][transform_id]
-            if self._should_process_row(df, meta, row_idx):
-                print(f"Processing row {row_idx} for transformation {transform_id}")
-                new_sig = self.compute_row_signature(df, row_idx, meta["input_cols"])
-                df = self.run_transformation_row(df, transform_id, row_idx)
-                meta["row_signatures"][str(row_idx)] = new_sig
+
+            # Check conditions
+            if not self._should_process_row(df, meta, row_idx):
+                self.lock.unlock()
+                return df
+
+            # Check signature/completed
+            input_cols = meta["input_cols"]
+            new_sig = self.compute_row_signature(df, row_idx, input_cols)
+
+            old_data = meta["row_signatures"].get(str(row_idx), {})
+            old_sig = old_data.get("signature", "")
+            completed = old_data.get("completed", False)
+
+            if completed and (new_sig == old_sig):
+                # Skip because data didn't change
+                self.lock.unlock()
+                return df
+
+            # Actually do the transformation
+            df = self.run_transformation_row(df, transform_id, row_idx)
+
+            # Update row signature and mark completed
+            meta["row_signatures"][str(row_idx)] = {
+                "signature": new_sig,
+                "completed": True
+            }
+
         finally:
             self.lock.unlock()
         return df
@@ -249,3 +286,17 @@ class TransformationManager:
             return False
         condition_series = self._build_condition_series(df, meta)
         return condition_series.iloc[row_idx]
+    
+    def copy_row_signatures(self, old_idx: int, new_idx: int):
+        """
+        Copy the row_signatures (including 'signature' and 'completed' flags)
+        from one row to another, so that the new row doesn't need to be re-run.
+        """
+        for transform_id, meta in self._metadata["transformations"].items():
+            row_sigs = meta.setdefault("row_signatures", {})
+            if str(old_idx) in row_sigs:
+                old_data = row_sigs[str(old_idx)]
+                # Make a copy so we don't mutate the original reference
+                row_sigs[str(new_idx)] = dict(old_data)
+        # Optionally save metadata now (or rely on auto-save to do it later)
+        self.save_metadata()

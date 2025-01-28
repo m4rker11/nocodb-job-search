@@ -73,7 +73,7 @@ class WizaIndividualRevealTransformation(BaseTransformation):
     predefined_output = True  # Override the flag
     output_columns = [  # Define fixed columns
         'Email', 
-        'Summary'
+        'LinkedIn_Summary'
     ]
 
     def required_inputs(self):
@@ -103,12 +103,12 @@ class WizaIndividualRevealTransformation(BaseTransformation):
                 personal_email, work_email = self._process_emails(data, reoon_client)
                 
                 # Build professional summary
-                summary = self._build_summary(data)
+
 
                 # Update row with extracted data
                 row['Email'] = work_email if work_email else personal_email
-                row['Summary'] = summary
-                row["Hiring_Manager_Name"] = data.get("Name", row["Hiring_Manager_Name"])
+                row['LinkedIn_Summary'] = data
+                row["Hiring_Manager_Name"] = data.get("name", row["Hiring_Manager_Name"])
 
             except Exception as e:
                 logger.error(f"[Wiza] Error processing row: {e}")
@@ -126,7 +126,7 @@ class WizaIndividualRevealTransformation(BaseTransformation):
                 continue
                 
             if reoon_client.verify_email(email):
-                email_type = email_info.get('email_type', '').lower()
+                email_type = email_info.get('type', '').lower()
                 if email_type == 'personal':
                     personal_email = email
                 elif email_type == 'work':

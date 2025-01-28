@@ -48,16 +48,7 @@ class MainWindow(QMainWindow):
         # Build UI immediately so it’s visible
         self.init_ui()
         self.init_headers()
-        # After building UI, load/check user settings
-        self.load_user_settings()
-        self.check_and_load_last_file()
         self.processing_rows = set()
-        # Initialize default transformations if new file
-        if not self.current_file_path:
-            self.setup_default_transformations()
-        
-        QTimer.singleShot(0, self.check_email_responses)
-
     def init_ui(self):
         """
         Initialize the main UI elements: toolbar, table, transformations row, etc.
@@ -160,7 +151,24 @@ class MainWindow(QMainWindow):
         self.table_view.setItemDelegateForColumn(0, self.run_row_delegate)
         self.run_row_delegate.clicked.connect(self.on_run_row_clicked)
         self.setCentralWidget(main_widget)
-    
+        
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Only run these once right after the GUI is shown
+        QTimer.singleShot(0, self._startup_after_ui)
+
+    def _startup_after_ui(self):
+        """
+        Called once the main window is fully visible.
+        We can safely load user settings, load the last file, start email checks, etc.
+        """
+        self.load_user_settings()
+        self.check_and_load_last_file()
+        # If no file was loaded, set up default transformations
+        if not self.current_file_path:
+            self.setup_default_transformations()
+
+        self.check_email_responses()
     def init_headers(self):
         """Initialize custom header with action buttons"""
         self.table_view.setHorizontalHeader(self.header)
@@ -333,7 +341,7 @@ class MainWindow(QMainWindow):
             # Create or load existing transformation manager for this file
             self.trans_manager = TransformationManager(file_path)
 
-            # Attempt to re-apply transformations (to fill in existing data) 
+            # Attempt to re-apply transformations (to fill in existing data)  TODO
             new_df = self.trans_manager.apply_all_transformations(df)
             self.df_model.setDataFrame(new_df)
 
@@ -499,7 +507,12 @@ class MainWindow(QMainWindow):
         updated_df = self.df_model.dataFrame()
         updated_df.iloc[row_idx] = new_row
         self.df_model.setDataFrame(updated_df)
+        old_row_idx = row_idx + 1
+        new_row_idx = row_idx
 
+        # 6) Copy the metadata (row_signatures) from the old row to this new row.
+        if self.trans_manager:
+            self.trans_manager.copy_row_signatures(old_idx=old_row_idx, new_idx=new_row_idx)
     def duplicate_row_for_new_hiring_manager(self, row_idx):
         df = self.df_model.dataFrame()
         if row_idx < 0 or row_idx >= len(df):
@@ -514,6 +527,12 @@ class MainWindow(QMainWindow):
         updated_df = self.df_model.dataFrame()
         updated_df.iloc[row_idx] = new_row
         self.df_model.setDataFrame(updated_df)
+        old_row_idx = row_idx + 1
+        new_row_idx = row_idx
+
+        # 6) Copy the metadata (row_signatures) from the old row to this new row.
+        if self.trans_manager:
+            self.trans_manager.copy_row_signatures(old_idx=old_row_idx, new_idx=new_row_idx)
 
     
     def on_cell_double_clicked(self, index):
