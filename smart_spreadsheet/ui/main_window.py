@@ -342,8 +342,8 @@ class MainWindow(QMainWindow):
             self.trans_manager = TransformationManager(file_path)
 
             # Attempt to re-apply transformations (to fill in existing data)  TODO
-            new_df = self.trans_manager.apply_all_transformations(df)
-            self.df_model.setDataFrame(new_df)
+            # new_df = self.trans_manager.apply_all_transformations(df)
+            # self.df_model.setDataFrame(new_df)
 
         except Exception as e:
             QMessageBox.critical(self, "Error Loading File", str(e))

@@ -26,7 +26,7 @@ class LinkedInMessageTransformation(MultiLLMTransformation):
                 "options": [],
                 "editable": True,
                 "description": "Model name based on provider",
-                "default": "gpt-4"
+                "default": "gpt-4o-mini"
             },
             {
                 "name": "api_key",
@@ -80,7 +80,7 @@ class LinkedInMessageTransformation(MultiLLMTransformation):
 
         # 4) Set up LLM call parameters
         provider = kwargs.get("provider", "OpenAI").strip().lower()
-        model_name = kwargs.get("model", "gpt-4").strip()
+        model_name = kwargs.get("model", "gpt-4o-mini").strip()
 
         self._init_clients()
         placeholder_wrapper = self.get_placeholder_wrapper()

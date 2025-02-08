@@ -51,12 +51,14 @@ class EmailService:
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
+                print("Refreshing token...")
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     self.credentials_file, GMAIL_OAUTH_SCOPES)
                 creds = flow.run_local_server(port=0)
             
+            # Save the new credentials (including any new refresh token)
             with open(self.token_file, 'w') as token:
                 token.write(creds.to_json())
                 

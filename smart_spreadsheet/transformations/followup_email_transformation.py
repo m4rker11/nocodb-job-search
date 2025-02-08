@@ -91,7 +91,7 @@ class FollowUpEmailTransformation(MultiLLMTransformation):
                 "options": [],
                 "editable": True,
                 "description": "Model name based on provider",
-                "default": "gpt-4"
+                "default": "gpt-4o-mini"
             },
             {
                 "name": "api_key",
@@ -159,30 +159,31 @@ class FollowUpEmailTransformation(MultiLLMTransformation):
         if user_few_shot:
             base_system_prompt = base_system_prompt.strip() + "\n\n" + f"Here are some examples of messages that worked in the past: {user_few_shot.strip()}"
 
-
+        # Initialize LLM clients
         self._init_clients()
+        placeholder_wrapper = self.get_placeholder_wrapper()
 
-        #add new column to df
-        temp_col = "__temp_email_col__"
-        df[temp_col] = ""
+        # Process row by row
+        for idx, row in df.iterrows():
+            try:
+                final_system = placeholder_wrapper(base_system_prompt, row)
+                final_user = placeholder_wrapper(user_prompt, row)
 
-        # We call super().transform with the new system_prompt and user_prompt
-        df = super().transform(
-            df,
-            output_col_name = temp_col,
-            system_prompt=base_system_prompt,
-            user_prompt=user_prompt,
-            json_mode = True,
-            **kwargs
-        )
-        print(df)
-        self._process_emails(df, temp_col)
+                # Generate emails using LLM
+                response = self._call_llm(
+                    kwargs.get("provider", "OpenAI").strip().lower(),
+                    kwargs.get("model", "gpt-4o-mini").strip(),
+                    final_system,
+                    final_user
+                )
+
+                # Parse JSON response
+                email_data = json.loads(response)
+                df.at[idx, "FollowUp_Email_1"] = json.dumps(email_data["email1"])
+                df.at[idx, "FollowUp_Email_2"] = json.dumps(email_data["email2"])
+                
+            except Exception as e:
+                df.at[idx, "FollowUp_Email_1"] = f"ERROR: {e}"
+                df.at[idx, "FollowUp_Email_2"] = f"ERROR: {e}"
 
         return df
-
-    def _process_emails(self, df, temp_col):
-        """Process generated emails directly from JSON string"""
-        # First parse the JSON string into a Python dict
-        df["FollowUp_Email_1"] = df[temp_col].apply(lambda x: json.dumps(json.loads(x)["email1"]))
-        df["FollowUp_Email_2"] = df[temp_col].apply(lambda x: json.dumps(json.loads(x)["email2"]))
-        df.drop(columns=[temp_col], inplace=True)
