@@ -162,7 +162,7 @@ Below is a broad outline of the key files/folders:
 
 ## License
 
-This project is distributed under an open or proprietary license of your choosing.
+This project is distributed under MIT Licence.
 
 Feel free to fork and adapt to your job search workflow!
 
