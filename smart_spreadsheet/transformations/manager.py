@@ -60,8 +60,9 @@ class TransformationManager:
         # Threading setup
         self.queue = Queue()
         self.thread_pool = QThreadPool()
-        self.thread_pool.setMaxThreadCount(3)  # 3 concurrent rows
-        self.lock = QMutex()
+        self.thread_pool.setMaxThreadCount(3)
+        self.row_locks = {}  # Dictionary of row index to QMutex
+        self.dict_lock = QMutex()  # Protects access to row_locks
 
     def get_metadata(self) -> dict:
         """Return the entire metadata dictionary (for debugging or saving)."""
@@ -156,13 +157,20 @@ class TransformationManager:
         return df
 
     def apply_single_transformation(self, df, transform_id, row_idx):
-        self.lock.lock()
+        # Get or create row-specific lock
+        self.dict_lock.lock()
+        try:
+            row_lock = self.row_locks.get(row_idx, QMutex())
+            self.row_locks[row_idx] = row_lock
+        finally:
+            self.dict_lock.unlock()
+
+        row_lock.lock()
         try:
             meta = self._metadata["transformations"][transform_id]
 
             # Check conditions
             if not self._should_process_row(df, meta, row_idx):
-                self.lock.unlock()
                 return df
 
             # Check signature/completed
@@ -174,8 +182,6 @@ class TransformationManager:
             completed = old_data.get("completed", False)
 
             if completed and (new_sig == old_sig):
-                # Skip because data didn't change
-                self.lock.unlock()
                 return df
 
             # Actually do the transformation
@@ -188,7 +194,7 @@ class TransformationManager:
             }
 
         finally:
-            self.lock.unlock()
+            row_lock.unlock()
         return df
 
     def add_row_to_queue(self, row_idx, df, sorted_transforms):
