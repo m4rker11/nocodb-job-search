@@ -7,6 +7,9 @@ import anthropic
 import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
+import logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 from transformations.base import BaseTransformation, SafeTemplate
 
@@ -33,7 +36,7 @@ class MultiLLMTransformation(BaseTransformation):
                 "name": "provider",
                 "type": "combobox",
                 "options": ["OpenAI", "Anthropic", "Ollama", "DeepSeek"],
-                "default": "OpenAI"
+                "default": "Ollama"
             },
             {
                 "name": "model",
@@ -41,7 +44,7 @@ class MultiLLMTransformation(BaseTransformation):
                 "options": [],
                 "editable": True,
                 "description": "Model name based on provider",
-                "default": "gpt-4o-mini"
+                "default": "llama3.1:8b"
             },
             {
                 "name": "api_key",
@@ -66,7 +69,7 @@ class MultiLLMTransformation(BaseTransformation):
         if extra_placeholders is None:
             extra_placeholders = {}
         # Initialize clients
-        self._init_clients()
+        
         placeholder_wrapper = self.get_placeholder_wrapper(extra_placeholders)
         # Process prompts for each row
         for idx, row in df.iterrows():
@@ -88,6 +91,7 @@ class MultiLLMTransformation(BaseTransformation):
 
     def _call_llm(self, provider, model_name, system_prompt, user_prompt, json_mode=False, max_retries=3):
         delay = 2
+        self._init_clients()
         for attempt in range(max_retries):
             try:
                 if provider == "openai":
@@ -95,7 +99,7 @@ class MultiLLMTransformation(BaseTransformation):
                 elif provider == "anthropic":
                     return self._call_anthropic(model_name, system_prompt, user_prompt)
                 elif provider == "ollama":
-                    return self._call_ollama(model_name, user_prompt)
+                    return self._call_ollama(model_name, system_prompt, user_prompt)
                 else:
                     raise ValueError(f"Unknown provider: {provider}")
             except Exception as e:
@@ -128,14 +132,15 @@ class MultiLLMTransformation(BaseTransformation):
         )
         return message.content[0].text.strip()
 
-    def _call_ollama(self, model_name, user_prompt):
+    def _call_ollama(self, model_name, system_prompt, user_prompt):
         url = "http://localhost:11434/api/generate"
         payload = {
             "model": model_name,
-            "prompt": user_prompt,
+            "prompt": system_prompt + "\n\n" + user_prompt,
             "stream": False,
             "temperature": 0.7
         }
+        logger.debug(payload)
         resp = requests.post(url, json=payload, timeout=120)
         if resp.status_code != 200:
             raise ValueError(f"Ollama error: {resp.status_code} - {resp.text}")

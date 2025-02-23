@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
             {"name": "LinkedIn_Intro", "type": "text", "transform": "linkedin_msg"},
             {"name": "FollowUp_Email_1", "type": "text", "transform": "followup_email"},
             {"name": "FollowUp_Email_2", "type": "text", "transform": "followup_email"},
-            
+            {"name": "Resume_PDF", "type": "text", "transform": "make_resume"},
             {"name": "Job_ID", "type": "text", "transform": None},
         ]
 
@@ -544,10 +544,24 @@ class MainWindow(QMainWindow):
         cell_value = str(df.iloc[index.row(), index.column()])
         col_name = df.columns[index.column()]
 
+        # If the clicked cell is for follow-up email, handle that...
         if col_name in ["FollowUp_Email_1", "FollowUp_Email_2"]:
             self.open_compose_dialog_for_email(index.row(), col_name)
+        # New: if the clicked cell is the resume PDF column, attempt to open the PDF file
+        elif col_name == "Resume_PDF":
+            if cell_value and not cell_value.startswith("ERROR"):
+                import subprocess
+                # On macOS/Linux use "open" (or "xdg-open"); on Windows use "start".
+                if os.name == "posix":
+                    subprocess.run(["open", cell_value])
+                else:
+                    subprocess.run(["start", cell_value], shell=True)
+            else:
+                self.reading_area.blockSignals(True)
+                self.reading_area.setPlainText(cell_value)
+                self.reading_area.blockSignals(False)
         else:
-            # Block signals to prevent immediate update
+            # Otherwise, display the cell content in the reading area.
             self.reading_area.blockSignals(True)
             self.reading_area.setPlainText(cell_value)
             self.reading_area.blockSignals(False)
@@ -780,6 +794,16 @@ class MainWindow(QMainWindow):
             condition_type="all_not_empty",
             condition_cols=["Email", "Job_Description", "Hiring_Manager_LinkedIn"]
         )
+
+        # Add the Make Resume transformation.
+        self.trans_manager.add_transformation(
+            transform_id="make_resume",
+            transformation_name="Make Resume Transformation",
+            input_cols=["Job_Description"],
+            output_col="Resume_PDF",
+            condition_type="is_not_empty",
+            condition_cols=["Job_Description"]
+        )
     def get_column_roles(self):
         """Return a dict mapping column names to 'input' or 'output'."""
         column_roles = {}
@@ -846,7 +870,6 @@ class MainWindow(QMainWindow):
 
             # Check for new columns added during transformation
             new_columns = new_data.index.difference(df.columns)
-            print(new_columns)
             if not new_columns.empty:
                 # Add missing columns to the DataFrame
                 for col in new_columns:

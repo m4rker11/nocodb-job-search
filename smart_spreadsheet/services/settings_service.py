@@ -1,7 +1,9 @@
 import os
+import json
 from PyQt6.QtCore import QSettings
 from .crypto_service import encrypt_value, decrypt_value
 from transformations.wiza_transformation import WizaAPI
+from transformations.llm_transformation import MultiLLMTransformation
 
 # For .env handling
 from dotenv import load_dotenv, set_key, get_key
@@ -24,18 +26,88 @@ def save_user_info(linkedin_url):
         
     try:
         wiza = WizaAPI()
-        reveal_id = wiza.create_individual_reveal(linkedin_url)
-        data = wiza.get_individual_reveal(reveal_id)
+        data = wiza.get_profile_data(linkedin_url)
         
         with open('user_info.txt', 'w', encoding='utf-8') as f:
             f.write(str(data))
     except Exception as e:
         print(f"Error saving user info: {e}")
 
+def ensure_resume_json_exists():
+    """Ensure resume.json exists by converting from resume.txt if needed"""
+    json_path = os.path.join(os.path.dirname(__file__), "resume.json")
+    
+    if not os.path.exists(json_path):
+        resume_text = get_resume_text()
+        if not resume_text:
+            return False
+            
+        try:
+            # Create LLM transformation instance
+            llm = MultiLLMTransformation()
+            
+            # Load JSON schema
+            schema_path = os.path.join(os.path.dirname(__file__), "resumeJSONSchema.json")
+            with open(schema_path, "r", encoding="utf-8") as f:
+                resume_format = f.read()
+            
+            # Prepare prompts
+            system_prompt = "You are a resume parsing expert."
+            user_prompt = (
+                "Convert this text extracted from my resume to resumeJSON.\n"
+                "----MY RESUME TEXT----\n{text}\n----------------------\n"
+                "Respond with it in the following JSON format:\n"
+                "----RESUME JSON FORMAT----\n{format}\n--------------------------\n"
+                "Rules:\n"
+                "1. If there is no information matching the field or it's not in the right format "
+                "(e.g. date in YYYY-MM-DD), don't include the field.\n"
+                "2. You MUST respond with the entire field's text if it is in the right format.\n"
+                "3. Conform the existing information to the JSON format, to make sure as much information as possible is included.\n"
+                "Respond with just the JSON."
+            ).format(text=resume_text, format=resume_format)
+            
+            # Call LLM
+            resume_json_str = llm._call_llm(
+                provider="openai",
+                model_name="gpt-4o-mini",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                json_mode=True
+            )
+            
+            # Save JSON
+            with open(json_path, "w", encoding="utf-8") as f:
+                f.write(resume_json_str)
+                
+            return True
+            
+        except Exception as e:
+            print(f"Error converting resume to JSON: {e}")
+            return False
+    
+    return True
+
 def save_user_resume(resume_text):
-    """Save resume text to file"""
+    """Save resume text to file and update JSON"""
+    # Save to text file
     with open('user_resume.txt', 'w', encoding='utf-8') as f:
         f.write(resume_text)
+    
+    # Force regeneration of JSON
+    json_path = os.path.join(os.path.dirname(__file__), "resume.json")
+    if os.path.exists(json_path):
+        os.remove(json_path)
+    
+    # Generate new JSON
+    ensure_resume_json_exists()
+
+def get_resume_json():
+    """Get the resume JSON data, converting from text if needed"""
+    if ensure_resume_json_exists():
+        json_path = os.path.join(os.path.dirname(__file__), "resume.json")
+        with open(json_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
 
 # -------------------------------
 # QSETTINGS-BASED FUNCTIONS

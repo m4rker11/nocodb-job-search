@@ -5,7 +5,9 @@ from queue import Queue
 from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool, QMutex
 from services.metadata_service import load_metadata, save_metadata
 from transformations.utils import find_transformations_in_package
+import logging
 
+logger = logging.getLogger(__name__)
 
 class TransformationSignals(QObject):
     """Signals for transformation progress and completion"""
@@ -35,7 +37,6 @@ class TransformationWorker(QRunnable):
                     self.df = self.trans_manager.apply_single_transformation(
                         self.df, transform_id, self.row_idx
                     )
-                    print(f"Updated row {self.row_idx} with {transform_id}, the row is now: {self.df.iloc[self.row_idx]}")
                 except Exception as e:
                     print(f"Error in {transform_id}: {str(e)}")
             
@@ -168,11 +169,11 @@ class TransformationManager:
         row_lock.lock()
         try:
             meta = self._metadata["transformations"][transform_id]
-
+            logger.debug(f"Applying transformation {transform_id} to row {row_idx}")
             # Check conditions
             if not self._should_process_row(df, meta, row_idx):
                 return df
-
+            logger.debug(f"Row {row_idx} should be processed")
             # Check signature/completed
             input_cols = meta["input_cols"]
             new_sig = self.compute_row_signature(df, row_idx, input_cols)
@@ -180,10 +181,10 @@ class TransformationManager:
             old_data = meta["row_signatures"].get(str(row_idx), {})
             old_sig = old_data.get("signature", "")
             completed = old_data.get("completed", False)
-
-            if completed and (new_sig == old_sig):
+            logger.debug(f"Old signature: {old_sig}, new signature: {new_sig}, completed: {completed}")
+            if completed and (new_sig != old_sig):
                 return df
-
+            logger.debug(f"Row {row_idx} should be processed")
             # Actually do the transformation
             df = self.run_transformation_row(df, transform_id, row_idx)
 
@@ -271,18 +272,27 @@ class TransformationManager:
         meta = self._metadata["transformations"].get(transform_id)
         if not meta:
             return df
-
+        logger.debug(f"Running transformation {transform_id} for row {row_idx}")
         transformation = self.transformations_dict.get(meta["transformation_name"])
         if not transformation:
+            logger.debug(f"Transformation {transform_id} not found")
             return df
-
+        logger.debug(f"Transformation {transform_id} found")
         input_cols = meta["input_cols"]
         output_col = meta["output_col"]
         extra_params = meta.get("extra_params", {})
 
-        # Call the transformation, passing **extra_params to handle any custom arguments
-        df = transformation.transform(df, output_col, *input_cols, **extra_params)
-
+        # MODIFIED SECTION - Create single-row dataframe
+        row_df = df.iloc[[row_idx]].copy()  # Note double brackets to keep DataFrame structure
+        logger.debug(f"Running transformation {transform_id} on row {row_idx}")
+        
+        # Call the transformation on single-row dataframe
+        transformed_row_df = transformation.transform(row_df, output_col, *input_cols, **extra_params)
+        
+        # Update original dataframe with results
+        df.update(transformed_row_df)
+        
+        logger.debug(f"Transformation {transform_id} applied to row {row_idx}")
         return df
     
     def should_process_transform(self, df: pd.DataFrame, transform_id: str, row_idx: int) -> bool:
