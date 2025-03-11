@@ -1,11 +1,12 @@
 # ui/compose_email_dialog.py
 import json
+import webbrowser
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTextEdit, QPushButton, QMessageBox
 )
 from PyQt6.QtCore import Qt
-from services.email_service import EmailService
+from services.email_service import send_email
 
 class ComposeEmailDialog(QDialog):
     def __init__(self, to_email="", subject="", body="", email_json="", parent=None):
@@ -85,15 +86,19 @@ class ComposeEmailDialog(QDialog):
             QMessageBox.warning(self, "Missing Body", "Email body cannot be empty.")
             return
 
-        # Send email
-        service = EmailService()
-        success, msg = service.send_email(to_addr, subject, body)
+        # Get the mailto link and open it in the default browser
+        success, mailto_link = send_email(to_addr, subject, body)
         
         if success:
-            QMessageBox.information(self, "Success", "Email sent successfully!")
-            self.accept()
+            try:
+                # Open the mailto link in the default browser/email client
+                webbrowser.open(mailto_link)
+                QMessageBox.information(self, "Success", "Email opened in your default email client!")
+                self.accept()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to open email client:\n{str(e)}")
         else:
-            QMessageBox.critical(self, "Error", f"Sending failed:\n{msg}")
+            QMessageBox.critical(self, "Error", f"Failed to create email link:\n{mailto_link}")
 
     def get_email_json(self):
         """Return the current email content as JSON"""

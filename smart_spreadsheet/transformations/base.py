@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from string import Template
 import os
+from typing import Union, Optional
 from PyQt6.QtWidgets import QWidget
 
 class SafeTemplate(Template):
@@ -90,7 +91,7 @@ class BaseTransformation(ABC):
         """
         return False
 
-    def create_settings_widget(self, parent=None) -> QWidget | None:
+    def create_settings_widget(self, parent=None) -> Optional[QWidget]:
         """
         Return a QWidget that holds custom settings fields (e.g. QLineEdit, QTextEdit).
         The host dialog will embed it in a 'Transformations' settings tab.

@@ -24,7 +24,8 @@ from services.file_service import load_data, save_data
 from transformations.utils import find_transformations_in_package
 from transformations.manager import TransformationManager
 from ui.transformation_header import TransformationHeader
-from services.email_service import extract_email_address, load_incoming_emails_last_24h
+from services.email_service import extract_email_address
+from typing import Dict, List, Optional, Union, Any
 
 
 class MainWindow(QMainWindow):
@@ -45,7 +46,7 @@ class MainWindow(QMainWindow):
         # Discover transformations
         self.transformations_dict = find_transformations_in_package("transformations")
 
-        # Build UI immediately so it’s visible
+        # Build UI immediately so it's visible
         self.init_ui()
         self.init_headers()
         self.processing_rows = set()
@@ -168,7 +169,6 @@ class MainWindow(QMainWindow):
         if not self.current_file_path:
             self.setup_default_transformations()
 
-        self.check_email_responses()
     def init_headers(self):
         """Initialize custom header with action buttons"""
         self.table_view.setHorizontalHeader(self.header)
@@ -818,7 +818,7 @@ class MainWindow(QMainWindow):
                 column_roles[output_col] = 'output'
         return column_roles
 
-    def get_column_role(self, column_index: int) -> str | None:
+    def get_column_role(self, column_index: int) -> Optional[str]:
         """Check if column is input/output considering multi-output transforms"""
         if not self.trans_manager or column_index < 0:
             return None
@@ -921,51 +921,6 @@ class MainWindow(QMainWindow):
         transformations.sort(key=lambda x: x[0])
         return [tid for _, tid in transformations]
     
-
-    def check_email_responses(self):
-        """Check for email responses in the last 24 hours and show matches."""
-        if not self.current_file_path:
-            return
-
-        df = self.df_model.dataFrame()
-        if df.empty:
-            return
-
-        # Get unique emails and company names
-        emails = df['Email'].dropna().unique().tolist()
-        if len(emails)==0:
-            return 
-        company_names = df['CompanyName'].dropna().unique().tolist()
-
-        # Fetch recent emails
-        recent_emails = load_incoming_emails_last_24h()
-
-        matched_indices = set()
-
-        # Check each recent email for matches
-        for email_info in recent_emails:
-            # Extract sender's email
-            sender_email = extract_email_address(email_info['from'])
-
-            # Check if sender is in the Email column
-            email_matches = df.index[df['Email'].str.lower() == sender_email.lower()].tolist()
-            matched_indices.update(email_matches)
-
-            # Check if company name is in email content
-            email_content = f"{email_info['subject']} {email_info['body']}"
-            for company in company_names:
-                if pd.isna(company):
-                    continue
-                pattern = re.compile(re.escape(str(company)), re.IGNORECASE)
-                if pattern.search(email_content):
-                    company_matches = df.index[
-                        df['CompanyName'].str.lower() == str(company).lower()
-                    ].tolist()
-                    matched_indices.update(company_matches)
-
-        if matched_indices:
-            matched_df = df.iloc[list(matched_indices)]
-            self.show_response_matches(matched_df)
 
     def show_response_matches(self, matched_df):
         """Display matching responses in a dialog"""
